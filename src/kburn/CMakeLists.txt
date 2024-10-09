@@ -82,7 +82,7 @@ if(APPLE)
 		"-Wl,-rpath,@loader_path"
 		"-Wl,-rpath,@executable_path"
 	)
-else()
+elseif(WIN32)
     target_link_options(kburn PRIVATE
         "-Wl,-rpath,."
 	)
@@ -102,15 +102,14 @@ add_dependencies(kburn spdlog)
 target_link_libraries(kburn PUBLIC spdlog $<$<BOOL:${MINGW}>:ws2_32>)
 
 ####################################### libusb ################################
-set(BUILD_SHARED_LIBS ON)
+set(LIBUSB_BUILD_SHARED_LIBS ON)
+set(LIBUSB_INSTALL_TARGETS OFF)
 add_subdirectory(3rd-party/libusb-cmake)
 
 add_dependencies(kburn usb-1.0)
 target_link_libraries(kburn PUBLIC usb-1.0)
 
-install(TARGETS kburn
-	LIBRARY DESTINATION lib
-)
+install(TARGETS kburn usb-1.0)
 
 # Add k230_flash_cli project
 add_subdirectory(cli)
