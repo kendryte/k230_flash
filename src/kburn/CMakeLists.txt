@@ -112,4 +112,6 @@ target_link_libraries(kburn PUBLIC usb-1.0)
 # Add k230_flash_cli project
 add_subdirectory(cli)
 
-install(TARGETS kburn usb-1.0)
+install(TARGETS kburn usb-1.0
+	LIBRARY DESTINATION lib
+)

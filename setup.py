@@ -108,7 +108,7 @@ class InstallCMakeLibsData(install_data):
 
 setup(
     name="k230_flash",
-    version="0.0.1",
+    version="0.0.2",
     author="kendryte747",
     author_email="kendryte747@gmail.com",
     description="K230 Burning Tool",
