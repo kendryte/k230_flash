@@ -35,7 +35,8 @@ requires = ["setuptools>=42", "wheel", "cmake>=3.18", "pybind11"]
 build-backend = "setuptools.build_meta"
 
 [tool.cibuildwheel]
-build = ["cp38*", "cp39*", "cp310*", "cp311*", "cp312*", "cp313"]
+#build = ["cp38*", "cp39*", "cp310*", "cp311*", "cp312*", "cp313"]
+build = ["cp38*"]
 skip = "*musllinux*"
 
 [tool.cibuildwheel.windows]
@@ -46,6 +47,7 @@ archs = ["x86_64"]
 before-all = [
     "yum install -y libudev-devel",
 ]
+repair_command = ""
 
 [tool.cibuildwheel.macos]
 archs = ["x86_64"]
