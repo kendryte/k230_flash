@@ -12,8 +12,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-python:
-    name: build-python-${{matrix.config.name}}
+  build-wheel:
+    name: build-wheel-${{matrix.config.name}}
     runs-on: ${{matrix.config.os}}
     strategy:
       matrix:
@@ -38,3 +38,31 @@ jobs:
 
     - name: Build wheel
       run: python -m cibuildwheel --output-dir wheelhouse
+
+    - name: Upload k230_flash-python Build Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: k230_flash-python-${{matrix.config.name}}
+        path: ${{github.workspace}}/wheelhouse
+        if-no-files-found: error
+
+jobs:
+  pypi-publish:
+    name: Upload release to PyPI
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+    needs: ["build-wheel"]
+    environment:
+      name: pypi
+      url: https://pypi.org/p/k230_flash
+    permissions:
+      id-token: write
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/download-artifact@v4
+      with:
+        path: ${{github.workspace}}/dist
+
+    - name: Publish package distributions to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
