@@ -82,10 +82,6 @@ if(APPLE)
 		"-Wl,-rpath,@loader_path"
 		"-Wl,-rpath,@executable_path"
 	)
-elseif(WIN32)
-    target_link_options(kburn PRIVATE
-        "-Wl,-rpath,."
-	)
 endif()
 
 ####################################### spdlog ################################

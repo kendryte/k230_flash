@@ -31,12 +31,9 @@ if(APPLE)
         "-Wl,-rpath,@loader_path"
         "-Wl,-rpath,@executable_path"
     )
-else()
-    target_link_options(kburn_python PRIVATE
-        "-Wl,-rpath,."
+    install(TARGETS kburn_python
+        LIBRARY DESTINATION lib
     )
+else()
+    install(TARGETS kburn_python)
 endif()
-
-install(TARGETS kburn_python
-    LIBRARY DESTINATION lib
-)
