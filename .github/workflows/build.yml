@@ -46,7 +46,6 @@ jobs:
         path: ${{github.workspace}}/wheelhouse
         if-no-files-found: error
 
-jobs:
   pypi-publish:
     name: Upload release to PyPI
     runs-on: ubuntu-latest
