@@ -1,27 +1,6 @@
-# K230 Flash Python
+# K230 Flash
 
-## Requirements
-
-```bash
-sudo apt install gcc python3-venv pybind11-dev
-
-# create virtual env, only first time
-python3 -m vevn ~/.venv
-
-# active virtual env, every time
-source ~/.venv/bin/activate
-
-pip3 install pybind11 wheel setuptools
-```
-
-## Build
-
-```bash
-# active virtual env, every time
-source ~/.venv/bin/activate
-
-python3 setup.py bdist_wheel
-```
+K230 Flash is a python tools to program Kendryte K230 and K230D Chips, Supports program firmware to `EMMC`, `SDCARD`, `SPI-NOR`, `SPI-NAND` and `OTP`
 
 ## Usage
 
