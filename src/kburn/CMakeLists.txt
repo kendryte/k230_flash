@@ -58,14 +58,18 @@ set_target_properties(kburn PROPERTIES
     LANGUAGE CXX
     LINKER_LANGUAGE CXX
 	PREFIX lib
-    INSTALL_RPATH "\$ORIGIN"
-    BUILD_WITH_INSTALL_RPATH TRUE
+    # INSTALL_RPATH "\$ORIGIN"
+    # BUILD_WITH_INSTALL_RPATH TRUE
 )
 
 if(APPLE)
 	target_link_options(kburn PRIVATE
 		"-Wl,-rpath,@loader_path"
 		"-Wl,-rpath,@executable_path"
+	)
+else()
+	target_link_options(kburn PRIVATE
+		"-Wl,-rpath,."
 	)
 endif()
 
