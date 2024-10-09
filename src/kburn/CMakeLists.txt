@@ -49,21 +49,6 @@ configure_file("${CMAKE_CURRENT_LIST_DIR}/include/version_info.h.in" "${CMAKE_CU
 
 add_library(kburn SHARED)
 
-file(GLOB K230_SRCS "burner_k230/*.cpp")
-
-set(SRCS
-    kburn.cpp
-    ${K230_SRCS}
-)
-
-target_sources(kburn PRIVATE ${SRCS})
-target_include_directories(kburn PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_include_directories(kburn PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/autogen)
-
-load_binary(kburn "k230_loader_mmc" "${CMAKE_CURRENT_LIST_DIR}/burner_k230/loader/loader_mmc.bin")
-load_binary(kburn "k230_loader_spi_nand" "${CMAKE_CURRENT_LIST_DIR}/burner_k230/loader/loader_spi_nand.bin")
-load_binary(kburn "k230_loader_spi_nor" "${CMAKE_CURRENT_LIST_DIR}/burner_k230/loader/loader_spi_nor.bin")
-
 target_compile_definitions(kburn PRIVATE
     $<$<CONFIG:Debug>:IS_DEBUG=1>
     $<$<CONFIG:Release>:IS_DEBUG=0>
@@ -84,8 +69,22 @@ if(APPLE)
 	)
 endif()
 
+file(GLOB K230_SRCS "burner_k230/*.cpp")
+
+set(SRCS
+    kburn.cpp
+    ${K230_SRCS}
+)
+
+target_sources(kburn PRIVATE ${SRCS})
+target_include_directories(kburn PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(kburn PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/autogen)
+
+load_binary(kburn "k230_loader_mmc" "${CMAKE_CURRENT_LIST_DIR}/burner_k230/loader/loader_mmc.bin")
+load_binary(kburn "k230_loader_spi_nand" "${CMAKE_CURRENT_LIST_DIR}/burner_k230/loader/loader_spi_nand.bin")
+load_binary(kburn "k230_loader_spi_nor" "${CMAKE_CURRENT_LIST_DIR}/burner_k230/loader/loader_spi_nor.bin")
+
 ####################################### spdlog ################################
-# spdlog should before libusb, becase we don't want compile spdlog shared
 set(SPDLOG_BUILD_PIC ON)
 
 if(APPLE)
@@ -98,14 +97,14 @@ add_dependencies(kburn spdlog)
 target_link_libraries(kburn PUBLIC spdlog $<$<BOOL:${MINGW}>:ws2_32>)
 
 ####################################### libusb ################################
-set(LIBUSB_BUILD_SHARED_LIBS ON)
+set(BUILD_SHARED_LIBS ON)
 set(LIBUSB_INSTALL_TARGETS OFF)
 add_subdirectory(3rd-party/libusb-cmake)
 
 add_dependencies(kburn usb-1.0)
 target_link_libraries(kburn PUBLIC usb-1.0)
 
-install(TARGETS kburn usb-1.0)
-
 # Add k230_flash_cli project
 add_subdirectory(cli)
+
+install(TARGETS kburn usb-1.0)
