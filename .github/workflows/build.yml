@@ -51,9 +51,9 @@ jobs:
     runs-on: ubuntu-latest
     # if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
     needs: ["build-wheel"]
-    # environment:
-      # name: pypi
-      # url: https://pypi.org/p/k230_flash
+    environment:
+      name: pypi
+      url: https://pypi.org/p/k230_flash
     permissions:
       id-token: write
     steps:
@@ -63,7 +63,5 @@ jobs:
       with:
         path: ${{github.workspace}}/dist
 
-    - name: Publish package distributions to TestPyPI
+    - name: Publish package distributions to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        repository-url: https://test.pypi.org/legacy/
