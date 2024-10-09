@@ -61,7 +61,24 @@ jobs:
 
     - uses: actions/download-artifact@v4
       with:
+        name: k230_flash-python-macos
         path: ${{github.workspace}}/dist
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: k230_flash-python-linux
+        path: ${{github.workspace}}/dist
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: k230_flash-python-windows
+        path: ${{github.workspace}}/dist
+
+    - name: List dist
+      run: |
+        ls -alh ${{github.workspace}}/dist
 
     - name: Publish package distributions to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        verbose: true
