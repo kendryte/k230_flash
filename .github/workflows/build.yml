@@ -1,0 +1,40 @@
+name: Python-Build
+
+on:
+  push:
+    tags: [ "v*" ]
+    branches: [ "dev", "test/*"]
+  pull_request:
+    branches: [ "main" ]
+
+concurrency:
+  group: Python-Build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-python:
+    name: build-python-${{matrix.config.name}}
+    runs-on: ${{matrix.config.os}}
+    strategy:
+      matrix:
+        config:
+          - {name: macos, os: macos-13}
+          - {name: linux, os: ubuntu-latest}
+          - {name: windows, os: windows-latest}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: "recursive"
+
+    - name: Create and activate virtual environment
+      run: |
+        python -m venv venv
+        echo "PATH=$(pwd)/venv/bin:$PATH" >> $GITHUB_ENV
+
+    - name: Install cibuildwheel
+      run: |
+        pip install cibuildwheel
+
+    - name: Build wheel
+      run: python -m cibuildwheel --output-dir wheelhouse

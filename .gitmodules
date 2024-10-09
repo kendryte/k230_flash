@@ -1,0 +1,9 @@
+[submodule "src/kburn/3rd-party/libusb-cmake"]
+	path = src/kburn/3rd-party/libusb-cmake
+	url = https://github.com/kendryte747/libusb-cmake.git
+[submodule "src/kburn/3rd-party/spdlog"]
+	path = src/kburn/3rd-party/spdlog
+	url = https://github.com/gabime/spdlog.git
+[submodule "src/test/3rd-party/CLI11"]
+	path = src/kburn/cli/CLI11
+	url = https://github.com/CLIUtils/CLI11.git

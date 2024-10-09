@@ -1,0 +1,7 @@
+__py_cache__
+build
+dist
+wheelhouse
+
+*.egg-info
+*.spec
