@@ -38,4 +38,5 @@ else()
 endif()
 
 install(TARGETS kburn_python
-        DESTINATION lib)
+        LIBRARY DESTINATION lib
+)
