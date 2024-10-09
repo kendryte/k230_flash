@@ -39,7 +39,7 @@ build = ["cp38*", "cp39*", "cp310*", "cp311*", "cp312*", "cp313"]
 skip = "*musllinux*"
 
 [tool.cibuildwheel.windows]
-archs = ["AMD64", "x86"]
+archs = ["AMD64"]
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64"]
