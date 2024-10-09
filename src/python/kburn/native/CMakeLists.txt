@@ -34,5 +34,5 @@ if(APPLE)
 endif()
 
 install(TARGETS kburn_python
-    LIBRARY DESTINATION lib
+    DESTINATION lib
 )
