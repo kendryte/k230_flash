@@ -47,7 +47,6 @@ archs = ["x86_64"]
 before-all = [
     "yum install -y libudev-devel",
 ]
-repair-wheel-command = ""
 
 [tool.cibuildwheel.macos]
 archs = ["x86_64"]
