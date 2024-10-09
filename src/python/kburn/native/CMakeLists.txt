@@ -31,7 +31,8 @@ if(APPLE)
         "-Wl,-rpath,@loader_path"
         "-Wl,-rpath,@executable_path"
     )
-    install(TARGETS kburn_python
-        LIBRARY DESTINATION lib
-    )
 endif()
+
+install(TARGETS kburn_python
+    LIBRARY DESTINATION lib
+)
