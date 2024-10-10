@@ -108,6 +108,11 @@ add_subdirectory(3rd-party/libusb-cmake)
 add_dependencies(kburn usb-1.0)
 target_link_libraries(kburn PUBLIC usb-1.0)
 
+set_target_properties(usb-1.0 PROPERTIES
+    INSTALL_RPATH "\$ORIGIN"
+    BUILD_WITH_INSTALL_RPATH TRUE
+)
+
 # Add k230_flash_cli project
 add_subdirectory(cli)
 
