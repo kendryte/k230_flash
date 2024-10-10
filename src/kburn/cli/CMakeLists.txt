@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.4...3.18)
 
-project(k230_flash VERSION ${VERSION_INFO})
+project(k230_flash)
 
 add_executable(${PROJECT_NAME} k230_flash.cpp)
 

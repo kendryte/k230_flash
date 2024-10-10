@@ -1,3 +1,4 @@
+import io
 import os
 import re
 import subprocess
@@ -30,6 +31,10 @@ class BuildCMakeExt(build_ext):
                 self.build_cmake(ext)
         super().run()
 
+    def is_in_cibuildwheel(self):
+        # maybe other env
+        return ('AUDITWHEEL_PLAT' in os.environ)
+
     def build_cmake(self, ext: Extension):
         """The steps required to build the extension"""
         self.announce("Preparing the build environment", level=3)
@@ -47,9 +52,10 @@ class BuildCMakeExt(build_ext):
         except OSError as e:
             print("Error: %s - %s." % (e.filename, e.strerror))
 
-        cmake_args = [f"-DVERSION_INFO={self.distribution.get_version()}"]
+        cmake_args = []
+        # cmake_args += [f"-DVERSION_INFO={self.distribution.get_version()}"]
         cmake_args += ['-DPython3_ROOT_DIR=' + os.path.dirname(sys.executable)]
-        cmake_args += ['-DCIBUILDWHEEL=' + ('ON' if 'CIBW_ENVIRONMENT' in os.environ else 'OFF')]
+        cmake_args += ['-DIS_CIBUILDWHEEL=' + ('ON' if self.is_in_cibuildwheel() else "OFF")]
         cfg = 'Debug' if self.debug else 'Release'
         build_args = ['--config', cfg]
         cmake_args += ['-DCMAKE_BUILD_TYPE=' + cfg]
@@ -107,9 +113,22 @@ class InstallCMakeLibsData(install_data):
         """Outfiles are the libraries that were built using cmake"""
         self.outfiles = self.distribution.data_files
 
+def find_version():
+    with io.open("CMakeLists.txt", encoding="utf8") as f:
+        version_file = f.read()
+
+    version_major = re.findall(r"K230_FLASH_VERSION_MAJOR (.+?)", version_file)
+    version_minor = re.findall(r"K230_FLASH_VERSION_MINOR (.+?)", version_file)
+    version_patch = re.findall(r"K230_FLASH_VERSION_PATCH (.+?)", version_file)
+
+    if version_major and version_minor and version_patch:
+        return version_major[0] + "." + version_minor[0] + "." + version_patch[0]
+
+    raise RuntimeError("Unable to find version string.")
+
 setup(
     name="k230_flash",
-    version="0.0.2",
+    version=find_version(),
     author="kendryte747",
     author_email="kendryte747@gmail.com",
     description="K230 Burning Tool",
@@ -119,8 +138,8 @@ setup(
     ext_modules=[CMakeExtension("_kburn")],
     cmdclass={
         'build_ext': BuildCMakeExt,
+        'install_lib': InstallCMakeLibs,
         'install_data': InstallCMakeLibsData,
-        'install_lib': InstallCMakeLibs
     },
     entry_points={
         'console_scripts': [

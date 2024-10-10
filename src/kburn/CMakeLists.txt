@@ -37,11 +37,11 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
-if(NOT DEFINED VERSION_INFO)
-    set(VERSION_INFO "0.0.1")
+if(NOT DEFINED K230_FLASH_VERSION_STRING)
+    set(K230_FLASH_VERSION_STRING "0.0.1")
 endif()
 
-project(libkburn VERSION ${VERSION_INFO})
+project(libkburn VERSION ${K230_FLASH_VERSION_STRING})
 
 set(COMPILE_TIME $DATE)
 string(TIMESTAMP COMPILE_TIME_STRING "%Y-%m-%d %H:%M")
@@ -86,7 +86,6 @@ elseif(UNIX AND NOT APPLE)
     # Linux-specific rpath settings
     target_link_options(kburn PRIVATE
         "-Wl,-rpath,$ORIGIN"
-        "-Wl,-rpath,$ORIGIN/../lib"
     )
 elseif(WIN32)
 
@@ -95,7 +94,7 @@ endif()
 # Set RPATH for installed binaries (common for macOS and Linux)
 if(NOT WIN32)
     set_target_properties(kburn PROPERTIES
-        INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib"
+        INSTALL_RPATH "$ORIGIN"
         BUILD_WITH_INSTALL_RPATH TRUE
     )
 endif()
@@ -123,4 +122,11 @@ target_link_libraries(kburn PUBLIC usb-1.0)
 # Add k230_flash_cli project
 add_subdirectory(cli)
 
-install(TARGETS kburn usb-1.0)
+if(LINUX AND IS_CIBUILDWHEEL)
+	message("Build by CIBUILDWHEEL")
+
+	install(TARGETS kburn usb-1.0
+		DESTINATION /lib/kburn)
+else()
+	install(TARGETS kburn usb-1.0)
+endif()
