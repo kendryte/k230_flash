@@ -1,63 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
 
-if(DEFINED ENV{CI})
-	set(IS_CI TRUE)
-else()
-	set(IS_CI FALSE)
-endif()
-
-execute_process(
-    COMMAND git rev-parse HEAD
-    OUTPUT_VARIABLE GIT_COMMIT
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-
-if(NOT DEFINED VERSION_INFO)
-    set(VERSION_INFO "0.0.1")
-endif()
-
-project(libkburn VERSION ${VERSION_INFO})
-
-set(COMPILE_TIME $DATE)
-string(TIMESTAMP COMPILE_TIME_STRING "%Y-%m-%d %H:%M")
-configure_file("${CMAKE_CURRENT_LIST_DIR}/include/version_info.h.in" "${CMAKE_CURRENT_BINARY_DIR}/autogen/version_info.h")
-
-add_library(kburn SHARED)
-
-set_target_properties(kburn PROPERTIES
-    LANGUAGE CXX
-    LINKER_LANGUAGE CXX
-	PREFIX lib # to be consistent with mainline libusb build system(s)
-    INSTALL_RPATH "\$ORIGIN"
-    BUILD_WITH_INSTALL_RPATH TRUE
-)
-
-if(APPLE)
-	target_link_options(kburn PRIVATE
-		"-Wl,-rpath,@loader_path"
-		"-Wl,-rpath,@executable_path"
-	)
-else()
-    target_link_options(kburn PRIVATE
-        "-Wl,-rpath,.")
-endif()
-
-file(GLOB K230_SRCS "burner_k230/*.cpp")
-
-set(SRCS
-    kburn.cpp
-    ${K230_SRCS}
-)
-
-target_sources(kburn PRIVATE ${SRCS})
-target_include_directories(kburn PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_include_directories(kburn PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/autogen)
-
-target_compile_definitions(kburn PRIVATE
-    $<$<CONFIG:Debug>:IS_DEBUG=1>
-    $<$<CONFIG:Release>:IS_DEBUG=0>
-)
-
 function(load_binary target variable src)
 	file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_LIST_DIR}" "${src}")
 	set(tgt "${CMAKE_CURRENT_BINARY_DIR}/${rel_path}.generate.c")
@@ -83,13 +25,81 @@ function(load_binary target variable src)
 	target_sources("${target}" PRIVATE "${tgt}")
 endfunction()
 
+if(DEFINED ENV{CI})
+	set(IS_CI TRUE)
+else()
+	set(IS_CI FALSE)
+endif()
+
+execute_process(
+    COMMAND git rev-parse HEAD
+    OUTPUT_VARIABLE GIT_COMMIT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+if(NOT DEFINED K230_FLASH_VERSION_STRING)
+    set(K230_FLASH_VERSION_STRING "0.0.1")
+endif()
+
+project(libkburn VERSION ${K230_FLASH_VERSION_STRING})
+
+set(COMPILE_TIME $DATE)
+string(TIMESTAMP COMPILE_TIME_STRING "%Y-%m-%d %H:%M")
+configure_file("${CMAKE_CURRENT_LIST_DIR}/include/version_info.h.in" "${CMAKE_CURRENT_BINARY_DIR}/autogen/version_info.h")
+
+add_library(kburn SHARED)
+
+file(GLOB K230_SRCS "burner_k230/*.cpp")
+
+set(SRCS
+    kburn.cpp
+    ${K230_SRCS}
+)
+
+target_sources(kburn PRIVATE ${SRCS})
+target_include_directories(kburn PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(kburn PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/autogen)
+
 load_binary(kburn "k230_loader_mmc" "${CMAKE_CURRENT_LIST_DIR}/burner_k230/loader/loader_mmc.bin")
 load_binary(kburn "k230_loader_spi_nand" "${CMAKE_CURRENT_LIST_DIR}/burner_k230/loader/loader_spi_nand.bin")
 load_binary(kburn "k230_loader_spi_nor" "${CMAKE_CURRENT_LIST_DIR}/burner_k230/loader/loader_spi_nor.bin")
 
+target_compile_definitions(kburn PRIVATE
+    $<$<CONFIG:Debug>:IS_DEBUG=1>
+    $<$<CONFIG:Release>:IS_DEBUG=0>
+)
+
+set_target_properties(kburn PROPERTIES
+    LANGUAGE CXX
+    LINKER_LANGUAGE CXX
+	PREFIX lib
+)
+
+if(APPLE)
+    # macOS-specific rpath settings
+    target_link_options(kburn PRIVATE
+        "-Wl,-rpath,@loader_path"
+        "-Wl,-rpath,@loader_path/../lib"
+        "-Wl,-rpath,@executable_path"
+    )
+elseif(UNIX AND NOT APPLE)
+    # Linux-specific rpath settings
+    target_link_options(kburn PRIVATE
+        "-Wl,-rpath,$ORIGIN"
+    )
+elseif(WIN32)
+
+endif()
+
+# Set RPATH for installed binaries (common for macOS and Linux)
+if(NOT WIN32)
+    set_target_properties(kburn PROPERTIES
+        INSTALL_RPATH "$ORIGIN"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
 
 ####################################### spdlog ################################
-# spdlog should before libusb, becase we don't want compile spdlog shared
 set(SPDLOG_BUILD_PIC ON)
 
 if(APPLE)
@@ -112,4 +122,11 @@ target_link_libraries(kburn PUBLIC usb-1.0)
 # Add k230_flash_cli project
 add_subdirectory(cli)
 
-install(TARGETS kburn usb-1.0)
+if(LINUX AND IS_CIBUILDWHEEL)
+	message("Build by CIBUILDWHEEL")
+
+	install(TARGETS kburn usb-1.0
+		DESTINATION /lib/kburn)
+else()
+	install(TARGETS kburn usb-1.0)
+endif()

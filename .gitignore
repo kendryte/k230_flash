@@ -1,7 +1,9 @@
-__py_cache__
+__pycache__
 build
+install
 dist
 wheelhouse
 
+.pytest_cache
 *.egg-info
 *.spec
