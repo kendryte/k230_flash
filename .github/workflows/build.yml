@@ -27,6 +27,12 @@ jobs:
       with:
         submodules: "recursive"
 
+    - name: Build kburn
+      run: |
+        cmake -S ${{github.workspace}}/src/kburn -B ${{github.workspace}}/build -DVERSION_INFO=0.0.2 -DCMAKE_BUILD_TYPE=Release
+        cmake --build ${{github.workspace}}/build --config Release
+        cmake --install ${{github.workspace}}/build --prefix ${{github.workspace}}/install
+
     - name: Create and activate virtual environment
       run: |
         python -m venv venv

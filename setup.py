@@ -49,6 +49,7 @@ class BuildCMakeExt(build_ext):
 
         cmake_args = [f"-DVERSION_INFO={self.distribution.get_version()}"]
         cmake_args += ['-DPython3_ROOT_DIR=' + os.path.dirname(sys.executable)]
+        cmake_args += ['-DCIBUILDWHEEL=' + ('ON' if 'CIBW_ENVIRONMENT' in os.environ else 'OFF')]
         cfg = 'Debug' if self.debug else 'Release'
         build_args = ['--config', cfg]
         cmake_args += ['-DCMAKE_BUILD_TYPE=' + cfg]

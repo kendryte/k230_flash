@@ -49,30 +49,6 @@ configure_file("${CMAKE_CURRENT_LIST_DIR}/include/version_info.h.in" "${CMAKE_CU
 
 add_library(kburn SHARED)
 
-target_compile_definitions(kburn PRIVATE
-    $<$<CONFIG:Debug>:IS_DEBUG=1>
-    $<$<CONFIG:Release>:IS_DEBUG=0>
-)
-
-set_target_properties(kburn PROPERTIES
-    LANGUAGE CXX
-    LINKER_LANGUAGE CXX
-	PREFIX lib
-    INSTALL_RPATH "\$ORIGIN"
-    BUILD_WITH_INSTALL_RPATH TRUE
-)
-
-if(APPLE)
-	target_link_options(kburn PRIVATE
-		"-Wl,-rpath,@loader_path"
-		"-Wl,-rpath,@executable_path"
-	)
-else()
-	target_link_options(kburn PRIVATE
-		"-Wl,-rpath,."
-	)
-endif()
-
 file(GLOB K230_SRCS "burner_k230/*.cpp")
 
 set(SRCS
@@ -87,6 +63,42 @@ target_include_directories(kburn PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/autogen)
 load_binary(kburn "k230_loader_mmc" "${CMAKE_CURRENT_LIST_DIR}/burner_k230/loader/loader_mmc.bin")
 load_binary(kburn "k230_loader_spi_nand" "${CMAKE_CURRENT_LIST_DIR}/burner_k230/loader/loader_spi_nand.bin")
 load_binary(kburn "k230_loader_spi_nor" "${CMAKE_CURRENT_LIST_DIR}/burner_k230/loader/loader_spi_nor.bin")
+
+target_compile_definitions(kburn PRIVATE
+    $<$<CONFIG:Debug>:IS_DEBUG=1>
+    $<$<CONFIG:Release>:IS_DEBUG=0>
+)
+
+set_target_properties(kburn PROPERTIES
+    LANGUAGE CXX
+    LINKER_LANGUAGE CXX
+	PREFIX lib
+)
+
+if(APPLE)
+    # macOS-specific rpath settings
+    target_link_options(kburn PRIVATE
+        "-Wl,-rpath,@loader_path"
+        "-Wl,-rpath,@loader_path/../lib"
+        "-Wl,-rpath,@executable_path"
+    )
+elseif(UNIX AND NOT APPLE)
+    # Linux-specific rpath settings
+    target_link_options(kburn PRIVATE
+        "-Wl,-rpath,$ORIGIN"
+        "-Wl,-rpath,$ORIGIN/../lib"
+    )
+elseif(WIN32)
+
+endif()
+
+# Set RPATH for installed binaries (common for macOS and Linux)
+if(NOT WIN32)
+    set_target_properties(kburn PROPERTIES
+        INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
+endif()
 
 ####################################### spdlog ################################
 set(SPDLOG_BUILD_PIC ON)
@@ -107,11 +119,6 @@ add_subdirectory(3rd-party/libusb-cmake)
 
 add_dependencies(kburn usb-1.0)
 target_link_libraries(kburn PUBLIC usb-1.0)
-
-set_target_properties(usb-1.0 PROPERTIES
-    INSTALL_RPATH "\$ORIGIN"
-    BUILD_WITH_INSTALL_RPATH TRUE
-)
 
 # Add k230_flash_cli project
 add_subdirectory(cli)

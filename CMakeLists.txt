@@ -7,7 +7,13 @@ endif()
 project(kburn VERSION ${VERSION_INFO})
 
 # libkburn
-add_subdirectory(src/kburn)
+option(CIBUILDWHEEL "Is USE cibuildwheel" OFF)
+
+if (NOT CIBUILDWHEEL)
+    add_subdirectory(src/kburn)
+else()
+    message("Is cibuildwheel")
+endif()
 
 # pybind
 add_subdirectory(src/python/kburn/native)
