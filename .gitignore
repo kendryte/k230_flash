@@ -4,5 +4,6 @@ install
 dist
 wheelhouse
 
+.pytest_cache
 *.egg-info
 *.spec
