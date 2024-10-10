@@ -51,6 +51,7 @@ archs = ["x86_64"]
 before-all = [
     "yum install -y libudev-devel",
 ]
+repair-wheel-command = "LD_LIBRARY_PATH=/usr/lib auditwheel repair -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.macos]
 archs = ["x86_64"]
