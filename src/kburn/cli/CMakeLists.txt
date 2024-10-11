@@ -50,7 +50,7 @@ if(WIN32 AND BUILD_WITH_MINGW)
     install(CODE "
         execute_process(
             COMMAND ${CMAKE_COMMAND} -E echo \"Running copy_dlls.sh\"
-            COMMAND bash \"\${CMAKE_SOURCE_DIR}/cli/cmake/copy_dlls.sh\"
+            COMMAND bash \"\${CMAKE_CURRENT_LIST_DIR}/cmake/copy_dlls.sh\"
                     \"${OUTPUT_EXE_NAME}\" \"${TOOLCHAIN_ROOT}\" \"${CMAKE_INSTALL_PREFIX}\" \"${OBJDUMP_COMMAND}\"
             RESULT_VARIABLE RESULT
             COMMAND_ECHO STDOUT
