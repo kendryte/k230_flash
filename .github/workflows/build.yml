@@ -79,3 +79,12 @@ jobs:
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         verbose: true
+
+    - name: Upload Release Assets
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        generate_release_notes: true
+        tag_name: ${{ github.ref_name }}
+        files: |
+          ${{github.workspace}}/dist/**/*.whl
