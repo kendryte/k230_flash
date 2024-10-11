@@ -114,7 +114,7 @@ class InstallCMakeLibsData(install_data):
         self.outfiles = self.distribution.data_files
 
 def find_version():
-    with io.open("CMakeLists.txt", encoding="utf8") as f:
+    with io.open("src/kburn/CMakeLists.txt", encoding="utf8") as f:
         version_file = f.read()
 
     version_major = re.findall(r"K230_FLASH_VERSION_MAJOR (.+?)", version_file)

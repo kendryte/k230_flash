@@ -53,7 +53,11 @@ bool K230BROMBurner::get_loader(const char **loader, size_t *size) {
     case KBURN_MEDIUM_SPI_NOR: {
       loader_buffer = k230_loader_spi_nor;
       loader_size = k230_loader_spi_nor_size;
-    }break;
+    } break;
+    case KBURN_MEDIUM_INVAILD: {
+      loader_buffer = NULL;
+      loader_size = 0;
+    } break;
   }
 
   *loader = loader_buffer;
