@@ -25,6 +25,15 @@ function(load_binary target variable src)
 	target_sources("${target}" PRIVATE "${tgt}")
 endfunction()
 
+set(K230_FLASH_VERSION_MAJOR 0)
+set(K230_FLASH_VERSION_MINOR 0)
+set(K230_FLASH_VERSION_PATCH 2)
+
+set(K230_FLASH_VERSION_STRING ${K230_FLASH_VERSION_MAJOR}.${K230_FLASH_VERSION_MINOR}.${K230_FLASH_VERSION_PATCH})
+message(STATUS "K230_FLASH_VERSION_STRING = ${K230_FLASH_VERSION_STRING}")
+
+option(IS_CIBUILDWHEEL "Build in cibuildwheel docker" OFF)
+
 if(DEFINED ENV{CI})
 	set(IS_CI TRUE)
 else()

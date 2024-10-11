@@ -148,8 +148,6 @@ struct kburn_usb_dev_info poll_and_open_device(const std::string& path = "", boo
 steady_clock::time_point progress_start_time;
 
 KBurner::progress_fn_t progress = [](void* ctx, size_t iteration, size_t total) {
-    (void *)ctx;
-
     if (iteration == 0) {
         // Set the start time when iteration is 0
         progress_start_time = steady_clock::now();
@@ -411,10 +409,10 @@ int main(int argc, char **argv) {
             size_t file_size;
             char *file_data = readFile(filename, file_size);
 
-            printf("Write %s to 0x%08X, Size: %zd.\n", filename.c_str(), address, file_size);
+            printf("Write %s to 0x%08lX, Size: %zd.\n", filename.c_str(), address, file_size);
 
             if(false == uboot_burner->write(file_data, file_size, address)) {
-                printf("Write %s to 0x%08X failed.\n", filename.c_str(), address);
+                printf("Write %s to 0x%08lX failed.\n", filename.c_str(), address);
 
                 delete uboot_burner;
                 goto _exit;
