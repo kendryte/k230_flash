@@ -50,13 +50,13 @@ jobs:
     - name: Compress artifacts
       run: |
         cd ${{ github.workspace }}/dist/bin
-        zip -r K230FlahsCli-Windows-${{ env.REVISION }}.zip *
+        zip -r k230flash_cli-Windows-${{ env.REVISION }}.zip *
 
     - name: Upload k230_flash-cli Build Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: "K230FlahsCli-Windows-${{ env.REVISION }}"
-        path: ${{ github.workspace }}/dist/bin/K230FlahsCli-Windows-${{ env.REVISION }}.zip
+        name: "k230_flash_cli-Windows-${{ env.REVISION }}"
+        path: ${{ github.workspace }}/dist/bin/k230flash_cli-Windows-${{ env.REVISION }}.zip
         if-no-files-found: error
 
   build-cli-liunx:
@@ -89,13 +89,13 @@ jobs:
     - name: Compress artifacts
       run: |
         cd ${{ github.workspace }}/build/dist
-        zip -r K230FlahsCli-Linux-${{ env.REVISION }}.zip *
+        zip -r k230flash_cli-Linux-${{ env.REVISION }}.zip *
 
     - name: Upload k230_flash-cli Build Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: "K230FlahsCli-Linux-${{ env.REVISION }}"
-        path: ${{ github.workspace }}/build/dist/K230FlahsCli-Linux-${{ env.REVISION }}.zip
+        name: "k230_flash_cli-Linux-${{ env.REVISION }}"
+        path: ${{ github.workspace }}/build/dist/k230flash_cli-Linux-${{ env.REVISION }}.zip
         if-no-files-found: error
 
   release:

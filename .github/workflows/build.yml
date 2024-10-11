@@ -53,6 +53,7 @@ jobs:
       url: https://pypi.org/p/k230_flash
     permissions:
       id-token: write
+      contents: write
     steps:
     - uses: actions/checkout@v4
 
