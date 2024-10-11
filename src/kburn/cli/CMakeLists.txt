@@ -50,11 +50,13 @@ message(STATUS "CMAKE_CURRENT_LIST_DIR ${CMAKE_CURRENT_LIST_DIR}")
 message(STATUS "CMAKE_CURRENT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}")
 message(STATUS "CMAKE_SOURCE_DIR ${CMAKE_SOURCE_DIR}")
 
+# this is just for ci build, so hard code the script path
+
 if(WIN32 AND BUILD_WITH_MINGW)
     install(CODE "
         execute_process(
             COMMAND ${CMAKE_COMMAND} -E echo \"Running copy_dlls.sh\"
-            COMMAND bash \"\${CMAKE_CURRENT_LIST_DIR}/cmake/copy_dlls.sh\"
+            COMMAND bash \"/project/src/kburn/cli/cmake/copy_dlls.sh\"
                     \"${OUTPUT_EXE_NAME}\" \"${TOOLCHAIN_ROOT}\" \"${CMAKE_INSTALL_PREFIX}\" \"${OBJDUMP_COMMAND}\"
             RESULT_VARIABLE RESULT
             COMMAND_ECHO STDOUT
