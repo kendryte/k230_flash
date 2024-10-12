@@ -11,14 +11,20 @@ KBURN_MEDIUM_SPI_NAND = "SPINAND"
 KBURN_MEDIUM_SPI_NOR = "SPINOR"
 KBURN_MEDIUM_OTP = "OTP"
 
+KBURN_SDIO0 = "SDIO0"
+KBURN_SDIO1 = "SDIO1"
+
 def get_burn_medium_type(medium_str):
     medium_map = {
         "INVALID": kburn.KBurnMediumType.INVALID,
-        "EMMC": kburn.KBurnMediumType.EMMC,
-        "SDCARD": kburn.KBurnMediumType.SDCARD,
-        "SPINAND": kburn.KBurnMediumType.SPINAND,
-        "SPINOR": kburn.KBurnMediumType.SPINOR,
-        "OTP": kburn.KBurnMediumType.OTP
+        KBURN_MEDIUM_EMMC: kburn.KBurnMediumType.EMMC,
+        KBURN_MEDIUM_SDCARD: kburn.KBurnMediumType.SDCARD,
+        KBURN_MEDIUM_SPI_NAND: kburn.KBurnMediumType.SPINAND,
+        KBURN_MEDIUM_SPI_NOR: kburn.KBurnMediumType.SPINOR,
+        KBURN_MEDIUM_OTP: kburn.KBurnMediumType.OTP,
+
+        KBURN_SDIO0: kburn.KBurnMediumType.EMMC,
+        KBURN_SDIO1: kburn.KBurnMediumType.SDCARD,
     }
     return medium_map.get(medium_str.upper(), kburn.KBurnMediumType.EMMC)  # Default to INVALID if not found
 
@@ -36,14 +42,18 @@ def get_log_level(level_str):
 
 def valid_custom_loader_address(value):
     try:
-        # Convert to integer, assuming the input is in hexadecimal
-        address = int(value, 16)
+        # If the value is already an integer (from the default argument), use it directly
+        if isinstance(value, int):
+            address = value
+        else:
+            # Otherwise, assume the value is a string and convert it to an integer
+            address = int(value)
     except ValueError:
         raise argparse.ArgumentTypeError(f"Invalid hex address: {value}")
 
     # Check if the address is within the valid range
     if not (0x80300000 <= address <= 0x80400000):
-        raise argparse.ArgumentTypeError(f"Address {value} out of range. Must be between 0x80200000 and 0x80400000.")
+        raise argparse.ArgumentTypeError(f"Address {hex(address)} out of range. Must be between 0x80300000 and 0x80400000.")
 
     return address
 
@@ -235,9 +245,11 @@ def main():
             KBURN_MEDIUM_SPI_NAND,
             KBURN_MEDIUM_SPI_NOR,
             KBURN_MEDIUM_OTP,
+            KBURN_SDIO0,
+            KBURN_SDIO1,
         ],
         default="EMMC",
-        help="Specify the medium type (choices: EMMC, SDCARD, SPI_NAND, SPI_NOR, OTP)"
+        help="Specify the medium type, Default is EMMC"
     )
 
     parser.add_argument(
