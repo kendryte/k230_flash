@@ -202,19 +202,6 @@ int main(int argc, char **argv) {
         ->transform(CLI::CheckedTransformer(log_level_map, CLI::ignore_case))
         ->default_str("WARN");
 
-    auto *loader_group = app.add_option_group("Custom Loader Options", "Options related to the custom loader");
-
-    bool custom_loader = false;
-    loader_group->add_flag("--custom-loader", custom_loader, "Enable custom loader");
-
-    unsigned long load_address = 0x80360000;
-    loader_group->add_option("--load-address", load_address, "The address where will loader run, Default 0x80360000")
-        ->check(ValidLoadAddress)
-        ->default_str("0x80360000");
-
-    std::string loader_file;
-    loader_group->add_option("--loader-file", loader_file, "Path to the custom loader file");
-
     enum KBurnMediumType medium_type = KBURN_MEDIUM_EMMC;
     std::map<std::string, KBurnMediumType> medium_map = {
         {"EMMC", KBURN_MEDIUM_EMMC},
@@ -233,6 +220,40 @@ int main(int argc, char **argv) {
 
     bool auto_reboot = false;
     app.add_flag("--auto-reboot", auto_reboot, "Enable automatic reboot.");
+
+    // loader
+    auto *loader_group = app.add_option_group("Custom Loader Options", "Options related to the custom loader");
+
+    bool custom_loader = false;
+    loader_group->add_flag("--custom-loader", custom_loader, "Enable custom loader");
+
+    unsigned long load_address = 0x80360000;
+    loader_group->add_option("--load-address", load_address, "The address where will loader run, Default 0x80360000")
+        ->check(ValidLoadAddress)
+        ->default_str("0x80360000");
+
+    std::string loader_file;
+    loader_group->add_option("--loader-file", loader_file, "Path to the custom loader file");
+
+    // read data
+    auto *read_data_group = app.add_option_group("Read data Options", "Options related to reading data from the device");
+
+    bool read_data = false;
+    read_data_group->add_flag("--read-data", read_data, "Read data from the device.");
+
+    unsigned long read_data_address = 0x00;
+    read_data_group->add_option("--read-address", read_data_address, "The address where reading data starts, default 0x00")
+        ->check(CLI::Number)
+        ->default_str("0x00");
+
+    unsigned long read_data_size = 4096;
+    read_data_group->add_option("--read-size", read_data_size, "The size of the data to read, default 4096")
+        ->check(CLI::Number)
+        ->default_str("4096");
+
+    std::string read_data_file = "data.bin";
+    read_data_group->add_option("--read-file", read_data_file, "The path where read data will be saved, default data.bin")
+        ->default_str("data.bin");
 
     std::vector<std::pair<unsigned long, std::string>> addr_filename_pairs;
     app.add_option("addr_filename", addr_filename_pairs, "Pairs of addresses followed by binary filenames")
@@ -253,35 +274,37 @@ int main(int argc, char **argv) {
               });
 
     // Iterate through the pairs and check for overlaps
-    for (size_t i = 0; i < addr_filename_pairs.size(); ++i) {
-        unsigned long address = addr_filename_pairs[i].first;
-        const std::string &filename = addr_filename_pairs[i].second;
+    if(false == read_data) {
+        for (size_t i = 0; i < addr_filename_pairs.size(); ++i) {
+            unsigned long address = addr_filename_pairs[i].first;
+            const std::string &filename = addr_filename_pairs[i].second;
 
-        std::ifstream file(filename, std::ios::binary);
-        if (!file) {
-            printf("Error: File not found - %s.\n", filename.c_str());
-            return 1;
-        }
-
-        file.seekg(0, std::ios::end);
-        size_t fileSize = file.tellg();
-        file.seekg(0, std::ios::beg); // Reset the file pointer to the beginning if needed
-
-        fileSize = round_up(fileSize, 4096);
-
-        // Check for overlaps with the next item
-        if (i < addr_filename_pairs.size() - 1) { // Ensure not to go out of bounds
-            unsigned long next_address = addr_filename_pairs[i + 1].first;
-            if (address + fileSize > next_address) {
-                printf("Warning: Overlap detected between %s and %s.\n",
-                       filename.c_str(), addr_filename_pairs[i + 1].second.c_str());
+            std::ifstream file(filename, std::ios::binary);
+            if (!file) {
+                printf("Error: File not found - %s.\n", filename.c_str());
+                return 1;
             }
+
+            file.seekg(0, std::ios::end);
+            size_t fileSize = file.tellg();
+            file.seekg(0, std::ios::beg); // Reset the file pointer to the beginning if needed
+
+            fileSize = round_up(fileSize, 4096);
+
+            // Check for overlaps with the next item
+            if (i < addr_filename_pairs.size() - 1) { // Ensure not to go out of bounds
+                unsigned long next_address = addr_filename_pairs[i + 1].first;
+                if (address + fileSize > next_address) {
+                    printf("Warning: Overlap detected between %s and %s.\n",
+                        filename.c_str(), addr_filename_pairs[i + 1].second.c_str());
+                }
+            }
+
+            // Update max file offset
+            file_offset_max = std::max(file_offset_max, address + fileSize);
+
+            // printf("Write %s to 0x%08X, Size: %ld\n", filename.c_str(), address, fileSize);
         }
-
-        // Update max file offset
-        file_offset_max = std::max(file_offset_max, address + fileSize);
-
-        // printf("Write %s to 0x%08X, Size: %ld\n", filename.c_str(), address, fileSize);
     }
 
     if(list_device) {
@@ -297,8 +320,8 @@ int main(int argc, char **argv) {
         goto _exit;
     }
 
-    if(0x00 == addr_filename_pairs.size()) {
-        printf("the following arguments are required: <address> <filename>.\n");
+    if((false == read_data) && (0x00 == addr_filename_pairs.size())) {
+        printf("the following arguments are required: <address> <filename>\n");
         goto _exit;
     }
 
@@ -395,29 +418,75 @@ int main(int argc, char **argv) {
 
         struct K230::kburn_medium_info *medium_info = uboot_burner->get_medium_info();
 
-        if(file_offset_max > medium_info->capacity) {
-            printf("Files exceed the capacity of meidum.\n");
+        if (read_data) {
+            // Ensure the read size is within the medium's capacity
+            if (read_data_size > medium_info->capacity) {
+                printf("The requested data size exceeds the capacity of the medium.\n");
+                delete uboot_burner;
+                goto _exit;
+            }
 
-            delete uboot_burner;
-            goto _exit;
-        }
+            // TODO: read data with chunk buffer.
+            // Allocate buffer for reading data
+            std::vector<uint8_t> file_data;
 
-        for (const auto& pair : addr_filename_pairs) {
-            unsigned long address = pair.first;
-            const std::string &filename = pair.second;
+            printf("Reading %lu bytes from 0x%08lX and saving to %s.\n", read_data_size, read_data_address, read_data_file.c_str());
 
-            size_t file_size;
-            char *file_data = readFile(filename, file_size);
+            file_data.resize(read_data_size, 0);
 
-            printf("Write %s to 0x%08lX, Size: %zd.\n", filename.c_str(), address, file_size);
-
-            if(false == uboot_burner->write(file_data, file_size, address)) {
-                printf("Write %s to 0x%08lX failed.\n", filename.c_str(), address);
+            // Perform the read operation
+            if (!uboot_burner->read(file_data.data(), read_data_size, read_data_address)) {
+                printf("Failed to read %lu bytes from 0x%08lX.\n", read_data_size, read_data_address);
 
                 delete uboot_burner;
                 goto _exit;
             }
-            delete []file_data;
+
+            // Save the read data to the specified file
+            FILE *file = fopen(read_data_file.c_str(), "wb");
+            if (file == NULL) {
+                printf("Failed to open file %s for writing.\n", read_data_file.c_str());
+                delete uboot_burner;
+                goto _exit;
+            }
+
+            size_t written_size = fwrite(file_data.data(), 1, read_data_size, file);
+            if (written_size != read_data_size) {
+                printf("Error: Failed to write all data to %s. Written %zu bytes.\n", read_data_file.c_str(), written_size);
+                fclose(file);
+                delete uboot_burner;
+                goto _exit;
+            }
+
+            // Successfully saved the data
+            printf("Successfully read and saved %lu bytes to %s.\n", read_data_size, read_data_file.c_str());
+
+            // Clean up resources
+            fclose(file);
+        } else {
+            if(file_offset_max > medium_info->capacity) {
+                printf("Files exceed the capacity of meidum.\n");
+
+                delete uboot_burner;
+                goto _exit;
+            }
+            for (const auto& pair : addr_filename_pairs) {
+                unsigned long address = pair.first;
+                const std::string &filename = pair.second;
+
+                size_t file_size;
+                char *file_data = readFile(filename, file_size);
+
+                printf("Write %s to 0x%08lX, Size: %zd.\n", filename.c_str(), address, file_size);
+
+                if(false == uboot_burner->write(file_data, file_size, address)) {
+                    printf("Write %s to 0x%08lX failed.\n", filename.c_str(), address);
+
+                    delete uboot_burner;
+                    goto _exit;
+                }
+                delete []file_data;
+            }
         }
 
         if(auto_reboot) {
@@ -426,8 +495,6 @@ int main(int argc, char **argv) {
         }
 
         delete uboot_burner;
-
-        printf("Write done.\n");
     }
 
 _exit:

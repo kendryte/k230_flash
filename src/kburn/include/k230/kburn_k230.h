@@ -56,8 +56,10 @@ struct kburn_t {
   char error_msg[128];
 
   int ep_in, ep_out;
+  uint16_t ep_out_mps;
   uint64_t capacity;
-  uint64_t dl_total, dl_size, dl_offset;
+
+  std::vector<uint8_t> rd_buffer;
 };
 
 class KBURN_API K230UBOOTBurner : public KBurner {
@@ -83,11 +85,14 @@ public:
 
   bool write(const void *data, size_t size, uint64_t address);
 
+  bool read(void *data, size_t size, uint64_t address);
+
 private:
   bool probe_succ = false;
-  uint64_t chunk_size = 512;
+  uint64_t out_chunk_size = 512;
+  uint64_t in_chunk_size = 512;
 
-  std::vector<uint8_t> write_buffer;
+  std::vector<uint8_t> wr_buffer;
 
   struct kburn_t kburn_;
 };

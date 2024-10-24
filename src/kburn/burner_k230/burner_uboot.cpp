@@ -14,8 +14,13 @@ enum kburn_pkt_cmd {
   KBURN_CMD_DEV_PROBE = 0x10,
   KBURN_CMD_DEV_GET_INFO = 0x11,
 
-  KBURN_CMD_WRITE_LBA = 0x20,
-  KBURN_CMD_ERASE_LBA = 0x21,
+	KBURN_CMD_ERASE_LBA = 0x20,
+
+	KBURN_CMD_WRITE_LBA = 0x21,
+	KBURN_CMD_WRITE_LBA_CHUNK = 0x22,
+
+	KBURN_CMD_READ_LBA = 0x23,
+	KBURN_CMD_READ_LBA_CHUNK = 0x24,
 
   KBURN_CMD_MAX,
 };
@@ -31,14 +36,14 @@ enum kburn_pkt_result {
   KBURN_RESULT_MAX,
 };
 
-#define KBUNR_USB_PKT_SIZE (64)
+#define KBUNR_USB_PKT_SIZE (60)
 
 #pragma pack(push, 1)
 
 struct kburn_usb_pkt {
   uint16_t cmd;
   uint16_t result; /* only valid in csw */
-  uint8_t data_size;
+  uint16_t data_size;
 };
 
 struct kburn_usb_pkt_wrap {
@@ -86,10 +91,12 @@ static int __get_endpoint(kburn_t *kburn) {
           continue;
 
         dir = (ep->bEndpointAddress & LIBUSB_ENDPOINT_DIR_MASK);
-        if (dir == LIBUSB_ENDPOINT_IN)
+        if (dir == LIBUSB_ENDPOINT_IN) {
           kburn->ep_in = ep->bEndpointAddress;
-        else
+        } else {
           kburn->ep_out = ep->bEndpointAddress;
+          kburn->ep_out_mps = ep->wMaxPacketSize;
+        }
       }
     }
   }
@@ -121,12 +128,23 @@ static bool kburn_write_data(kburn_t *kburn, void *data, int length) {
     return false;
   }
 
+  if(0x00 == (length % kburn->ep_out_mps)) {
+    if(LIBUSB_SUCCESS != (rc = libusb_bulk_transfer(kburn->node->handle, kburn->ep_out, reinterpret_cast<uint8_t *>(data), 0, &size, kburn->medium_info.timeout_ms))) {
+      spdlog::error("usb bulk write ZLP failed, {}({})", rc, libusb_error_name(rc));
+      return false;
+    }
+  }
+
   return true;
 }
 
 static bool kburn_read_data(kburn_t *kburn, void *data, int length,
                             int *is_timeout) {
   int rc = -1, size = 0;
+
+  if(NULL == data) {
+      spdlog::error("invalid buffer");
+  }
 
   rc = libusb_bulk_transfer(
       /* dev_handle       */ kburn->node->handle,
@@ -296,9 +314,9 @@ void kburn_reset_chip(kburn_t *kburn) {
 }
 
 bool kburn_probe(kburn_t *kburn, enum KBurnMediumType target,
-                 uint64_t *chunk_size) {
+                 uint64_t *out_out_chunk_size, uint64_t *in_out_chunk_size) {
   uint8_t data[2];
-  uint64_t result[1];
+  uint64_t result[2];
   int result_size = sizeof(result);
 
   data[0] = target;
@@ -317,10 +335,14 @@ bool kburn_probe(kburn_t *kburn, enum KBurnMediumType target,
     return false;
   }
 
-  if (chunk_size) {
-    *chunk_size = result[0];
+  spdlog::error("kburn probe, chunksize: out {}, in {}", result[0], result[1]);
 
-    spdlog::info("kburn probe, chunksize {}", *chunk_size);
+  if (out_out_chunk_size) {
+    *out_out_chunk_size = result[0];
+  }
+
+  if(in_out_chunk_size) {
+    *in_out_chunk_size = result[1];
   }
 
   return true;
@@ -521,6 +543,116 @@ bool kbrun_write_end(struct kburn_t *kburn) {
   return true;
 }
 
+bool kburn_read_start(struct kburn_t *kburn, uint64_t offset, uint64_t size) {
+  uint64_t cfg[2] = {offset, size};
+
+  if ((offset + size) > kburn->medium_info.capacity) {
+    spdlog::error("kburn read medium exceed");
+
+    strncpy(kburn->error_msg, "kburn read medium exceed",
+            sizeof(kburn->error_msg));
+    return false;
+  }
+
+  if (false == kburn_send_cmd(kburn, KBURN_CMD_READ_LBA, &cfg[0], sizeof(cfg),
+                              NULL, NULL)) {
+    spdlog::error("kburn write medium cfg failed");
+    return false;
+  }
+
+  spdlog::info("kburn write medium cfg succ");
+
+  return true;
+}
+
+bool kburn_read_chunk(struct kburn_t *kburn, void *data, uint64_t size) {
+  int is_timeout;
+  int retry_times = 0;
+  int max_retry = 3;
+
+  struct kburn_usb_pkt_wrap *pkt = NULL;
+
+  int read_buffer_size = sizeof(struct kburn_usb_pkt) + 4096 + size;
+
+  spdlog::debug("read chunk {}", size);
+
+  if(read_buffer_size > kburn->rd_buffer.size()) {
+    kburn->rd_buffer.resize(read_buffer_size, 0);
+  }
+
+  do {
+    is_timeout = 0;
+
+    if (true == kburn_read_data(kburn, kburn->rd_buffer.data(), size + sizeof(struct kburn_usb_pkt), &is_timeout)) {
+      break;
+    }
+
+    if (LIBUSB_ERROR_TIMEOUT != is_timeout) {
+      spdlog::info("kburn erase medium read resp failed");
+
+      return false;
+    }
+
+    do_sleep(1000);
+  } while ((retry_times++) < max_retry);
+
+  pkt = reinterpret_cast<struct kburn_usb_pkt_wrap *>(kburn->rd_buffer.data());
+
+  if (((KBURN_CMD_READ_LBA_CHUNK | CMD_FLAG_DEV_TO_HOST) != pkt->hdr.cmd) || \
+      (KBURN_RESULT_OK != pkt->hdr.result))
+  {
+    spdlog::error("kburn read medium chunk failed, result cmd {:04x}, status {:04x}", pkt->hdr.cmd, pkt->hdr.result);
+    return false;
+  }
+
+  if(pkt->hdr.data_size != size) {
+    spdlog::error("kburn read medium chunk failed, read data size mismatch {} != {}", size, pkt->hdr.data_size);
+    return false;
+  }
+
+  memcpy(data, pkt->data, pkt->hdr.data_size);
+
+  return true;
+}
+
+bool kbrun_read_end(struct kburn_t *kburn) {
+  struct kburn_usb_pkt_wrap csw;
+
+  if (false == kburn_read_data(kburn, &csw, sizeof(csw), NULL)) {
+    spdlog::error("kburn read medium end, recv error msg failed.");
+
+    return false;
+  }
+
+  if (csw.hdr.cmd != (KBURN_CMD_READ_LBA_CHUNK | CMD_FLAG_DEV_TO_HOST)) {
+    spdlog::error("kburn read medium end, resp cmd error.");
+
+    strncpy(kburn->error_msg, "kburn read medium end, resp cmd error.",
+            sizeof(kburn->error_msg));
+
+    return false;
+  }
+
+  if (KBURN_RESULT_OK != csw.hdr.result) {
+    spdlog::error("command recv error resp result");
+
+    strncpy(kburn->error_msg, "cmd recv resp error", sizeof(kburn->error_msg));
+
+    if (KBURN_RESULT_ERROR_MSG == csw.hdr.result) {
+      csw.data[csw.hdr.data_size] = 0;
+
+      spdlog::error("command recv error resp, error msg {}", reinterpret_cast<char *>(csw.data));
+
+      strncpy(kburn->error_msg, reinterpret_cast<char *>(csw.data), sizeof(kburn->error_msg));
+    }
+
+    return false;
+  }
+
+  spdlog::info("read end, resp msg {}", reinterpret_cast<char *>(csw.data));
+
+  return true;
+}
 ///////////////////////////////////////////////////////////////////////////////
 K230UBOOTBurner::K230UBOOTBurner(struct kburn_usb_node *node) : KBurner(node) {
   kburn_.node = node;
@@ -538,7 +670,7 @@ K230UBOOTBurner::K230UBOOTBurner(struct kburn_usb_node *node) : KBurner(node) {
 }
 
 bool K230UBOOTBurner::probe(void) {
-  probe_succ = kburn_probe(&kburn_, _medium_type, &chunk_size);
+  probe_succ = kburn_probe(&kburn_, _medium_type, &out_chunk_size, &in_chunk_size);
 
   return probe_succ;
 }
@@ -565,13 +697,15 @@ bool K230UBOOTBurner::write(const void *data, size_t size, uint64_t address) {
   size_t blk_size = kburn_.medium_info.blk_size;
   size_t aligned_size = (size + blk_size - 1) / blk_size * blk_size;
 
-  write_buffer.resize(aligned_size, 0);
-  memcpy(write_buffer.data(), reinterpret_cast<const uint8_t*>(data), size);
+  wr_buffer.resize(aligned_size, 0);
+  memcpy(wr_buffer.data(), reinterpret_cast<const uint8_t*>(data), size);
 
   if (false == kburn_write_start(&kburn_, address, aligned_size)) {
     spdlog::error("uboot burner, start write failed");
     return false;
   }
+
+  do_sleep(100);
 
   bytes_sent = 0;
   total_size = aligned_size;
@@ -579,14 +713,14 @@ bool K230UBOOTBurner::write(const void *data, size_t size, uint64_t address) {
   log_progress(0, total_size);
 
   do {
-    if ((total_size - bytes_sent) > chunk_size) {
-      bytes_per_send = chunk_size;
+    if ((total_size - bytes_sent) > out_chunk_size) {
+      bytes_per_send = out_chunk_size;
     } else {
       bytes_per_send = (total_size - bytes_sent);
     }
 
     if (false ==
-        kburn_write_chunk(&kburn_, write_buffer.data() + bytes_sent, bytes_per_send)) {
+        kburn_write_chunk(&kburn_, wr_buffer.data() + bytes_sent, bytes_per_send)) {
       spdlog::error("write failed @ {}", bytes_sent);
 
       return false;
@@ -601,6 +735,49 @@ bool K230UBOOTBurner::write(const void *data, size_t size, uint64_t address) {
   if (false == kbrun_write_end(&kburn_)) {
     spdlog::error("uboot burner, finsh write failed");
     return false;
+  }
+
+  return true;
+}
+
+bool K230UBOOTBurner::read(void *data, size_t size, uint64_t address) {
+  uint64_t bytes_per_read, bytes_read = 0, total_size = 0;
+
+  size_t blk_size = kburn_.medium_info.blk_size;
+  size_t aligned_size = (size + blk_size - 1) / blk_size * blk_size;
+
+  if(false == kburn_read_start(&kburn_, address, size)) {
+    spdlog::error("uboot burner, start read failed");
+    return false;
+  }
+
+  bytes_read = 0;
+  total_size = aligned_size;
+
+  log_progress(0, total_size);
+
+  do {
+    if ((total_size - bytes_read) > in_chunk_size) {
+      bytes_per_read = in_chunk_size;
+    } else {
+      bytes_per_read = (total_size - bytes_read);
+    }
+
+    if (false ==
+        kburn_read_chunk(&kburn_, reinterpret_cast<uint8_t *>(data) + bytes_read, bytes_per_read)) {
+      spdlog::error("read failed @ {}", bytes_read);
+
+      return false;
+    }
+
+    bytes_read += bytes_per_read;
+
+    log_progress(bytes_read, total_size);
+  } while (bytes_read < total_size);
+
+  if (false == kbrun_read_end(&kburn_)) {
+    spdlog::error("uboot burner, finsh read failed");
+    // return false;
   }
 
   return true;
