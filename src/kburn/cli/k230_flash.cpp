@@ -289,7 +289,9 @@ int main(int argc, char **argv) {
             size_t fileSize = file.tellg();
             file.seekg(0, std::ios::beg); // Reset the file pointer to the beginning if needed
 
-            fileSize = round_up(fileSize, 4096);
+            if(4096 <= fileSize) {
+                fileSize = round_up(fileSize, 4096);
+            }
 
             // Check for overlaps with the next item
             if (i < addr_filename_pairs.size() - 1) { // Ensure not to go out of bounds
