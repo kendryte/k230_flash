@@ -84,6 +84,7 @@ public:
   }
 
   bool write(const void *data, size_t size, uint64_t address);
+  bool write(const void *data, size_t size, uint64_t address, uint64_t max);
 
   bool read(void *data, size_t size, uint64_t address);
 

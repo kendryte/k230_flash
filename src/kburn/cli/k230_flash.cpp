@@ -221,6 +221,11 @@ int main(int argc, char **argv) {
     bool auto_reboot = false;
     app.add_flag("--auto-reboot", auto_reboot, "Enable automatic reboot.");
 
+    unsigned long part_max_size = 0;
+    app.add_option("--part-max-size", part_max_size, "The max size of the partition, only valid when medium is spi nand, Default 0 means unlimit")
+        ->check(CLI::Number)
+        ->default_str("0");
+
     // loader
     auto *loader_group = app.add_option_group("Custom Loader Options", "Options related to the custom loader");
 
@@ -272,6 +277,15 @@ int main(int argc, char **argv) {
               [](const auto& a, const auto& b) {
                   return a.first < b.first;
               });
+
+    if(KBURN_MEDIUM_SPI_NAND == medium_type) {
+        if(0x01 != addr_filename_pairs.size()) {
+            printf("SPI Nand can only set 1 file.\n");
+            goto _exit;
+        }
+    } else {
+        part_max_size = 0;
+    }
 
     // Iterate through the pairs and check for overlaps
     if(false == read_data) {
@@ -481,7 +495,7 @@ int main(int argc, char **argv) {
 
                 printf("Write %s to 0x%08lX, Size: %zd.\n", filename.c_str(), address, file_size);
 
-                if(false == uboot_burner->write(file_data, file_size, address)) {
+                if(false == uboot_burner->write(file_data, file_size, address, part_max_size)) {
                     printf("Write %s to 0x%08lX failed.\n", filename.c_str(), address);
 
                     delete uboot_burner;

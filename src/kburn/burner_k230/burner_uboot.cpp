@@ -436,8 +436,8 @@ bool kburn_erase(struct kburn_t *kburn, uint64_t offset, uint64_t size,
   return true == kburn_parse_resp(&csw, kburn, KBURN_CMD_ERASE_LBA, NULL, NULL);
 }
 
-bool kburn_write_start(struct kburn_t *kburn, uint64_t offset, uint64_t size) {
-  uint64_t cfg[2] = {offset, size};
+bool kburn_write_start(struct kburn_t *kburn, uint64_t offset, uint64_t size, uint64_t max) {
+  uint64_t cfg[3] = {offset, size, max};
 
   if ((offset + size) > kburn->medium_info.capacity) {
     spdlog::error("kburn write medium exceed");
@@ -692,6 +692,10 @@ bool K230UBOOTBurner::reboot(void) {
 }
 
 bool K230UBOOTBurner::write(const void *data, size_t size, uint64_t address) {
+  return write(data, size, address, 0);
+}
+
+bool K230UBOOTBurner::write(const void *data, size_t size, uint64_t address, uint64_t max) {
   uint64_t bytes_per_send, bytes_sent = 0, total_size = 0;
 
   size_t blk_size = kburn_.medium_info.blk_size;
@@ -700,7 +704,7 @@ bool K230UBOOTBurner::write(const void *data, size_t size, uint64_t address) {
   wr_buffer.resize(aligned_size, 0);
   memcpy(wr_buffer.data(), reinterpret_cast<const uint8_t*>(data), size);
 
-  if (false == kburn_write_start(&kburn_, address, aligned_size)) {
+  if (false == kburn_write_start(&kburn_, address, aligned_size, max)) {
     spdlog::error("uboot burner, start write failed");
     return false;
   }
