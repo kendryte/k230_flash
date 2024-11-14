@@ -1,14 +1,17 @@
-#include <CLI/CLI.hpp>
 #include <string>
 #include <vector>
-#include <stdexcept>
 #include <fstream>
-
+#include <sstream>
 #include <iostream>
 #include <chrono>
 #include <iomanip>
+#include <iomanip>
+
+#include <stdexcept>
 
 #include <cstdio>
+
+#include <CLI/CLI.hpp>
 
 #include <kburn.h>
 #include <k230/kburn_k230.h>
@@ -180,13 +183,70 @@ KBurner::progress_fn_t progress = [](void* ctx, size_t iteration, size_t total) 
     fflush(stdout);  // Flush the output to update the terminal
 };
 
+struct AddrFilePartition {
+    unsigned long address;
+    std::string file_path;
+    unsigned long partition_max_size = 0;  // default value
+};
+
+// Overload the >> operator for AddrFilePartition
+std::istream& operator>>(std::istream& in, AddrFilePartition& value) {
+    std::string input;
+    std::getline(in, input);  // Read the entire input line
+
+    std::stringstream ss(input);
+    std::string token;
+
+    // Parse the address (first part)
+    if (!std::getline(ss, token, ',')) {
+        in.setstate(std::ios::failbit);
+        return in;
+    }
+    value.address = std::stoul(token);  // Convert address from string to unsigned long
+
+    // Parse the file path (second part)
+    if (!std::getline(ss, token, ',')) {
+        in.setstate(std::ios::failbit);
+        return in;
+    }
+    value.file_path = token;  // Assign file path
+
+    // Parse the partition max size (third part, optional)
+    if (std::getline(ss, token, ',')) {
+        value.partition_max_size = std::stoul(token);  // Convert partition max size
+    } else {
+        value.partition_max_size = 0;  // Default to 0 if not provided
+    }
+
+    return in;
+}
+
 int main(int argc, char **argv) {
     struct kburn_usb_dev_info dev;
 
     CLI::App app{"Kendryte Burning Tool"};
 
+    bool auto_reboot = false;
+    app.add_flag("--auto-reboot", auto_reboot, "Enable automatic reboot.");
+
     bool list_device = false;
     app.add_flag("-l,--list-device", list_device, "List devices");
+
+    enum KBurnMediumType medium_type = KBURN_MEDIUM_EMMC;
+    std::map<std::string, KBurnMediumType> medium_map = {
+        {"EMMC", KBURN_MEDIUM_EMMC},
+        {"SDCARD", KBURN_MEDIUM_SDCARD},
+        {"SPI_NAND", KBURN_MEDIUM_SPI_NAND},
+        {"SPI_NOR", KBURN_MEDIUM_SPI_NOR},
+        {"OTP", KBURN_MEDIUM_OTP}
+    };
+    app.add_option("-m,--medium-type", medium_type, "Specify the medium type, Default EMMC")
+        ->transform(CLI::CheckedTransformer(medium_map, CLI::ignore_case))
+        ->default_str("EMMC");
+
+    std::string device_address;
+    app.add_option("-d,--device-address", device_address, "Device address (format: 1-1 or 3-1), which is the result from '--list-device'")
+        ->default_str("");
 
     spdlog::level::level_enum log_level = spdlog::level::level_enum::warn;
     std::map<std::string, spdlog::level::level_enum> log_level_map = {
@@ -198,33 +258,14 @@ int main(int argc, char **argv) {
         {"CRITICAL", spdlog::level::level_enum::critical},
         {"OFF", spdlog::level::level_enum::off},
     };
-    app.add_option("--log-level", log_level, "Set the logging level")
+    app.add_option("--log-level", log_level, "Set the logging level, Default WARN")
         ->transform(CLI::CheckedTransformer(log_level_map, CLI::ignore_case))
         ->default_str("WARN");
 
-    enum KBurnMediumType medium_type = KBURN_MEDIUM_EMMC;
-    std::map<std::string, KBurnMediumType> medium_map = {
-        {"EMMC", KBURN_MEDIUM_EMMC},
-        {"SDCARD", KBURN_MEDIUM_SDCARD},
-        {"SPI_NAND", KBURN_MEDIUM_SPI_NAND},
-        {"SPI_NOR", KBURN_MEDIUM_SPI_NOR},
-        {"OTP", KBURN_MEDIUM_OTP}
-    };
-    app.add_option("-m,--medium-type", medium_type, "Specify the medium type")
-        ->transform(CLI::CheckedTransformer(medium_map, CLI::ignore_case))
-        ->default_str("EMMC");
+    std::vector<AddrFilePartition> addr_filename_pairs;
 
-    std::string device_address;
-    app.add_option("-d,--device-address", device_address, "Device address (format: 1-1 or 3-1), which is the result from '--list-device'")
-        ->default_str("");
-
-    bool auto_reboot = false;
-    app.add_flag("--auto-reboot", auto_reboot, "Enable automatic reboot.");
-
-    unsigned long part_max_size = 0;
-    app.add_option("--part-max-size", part_max_size, "The max size of the partition, only valid when medium is spi nand, Default 0 means unlimit")
-        ->check(CLI::Number)
-        ->default_str("0");
+    app.add_option("addr_filename", addr_filename_pairs, "Address, file path, and optional partition max size")
+        ->expected(-1);
 
     // loader
     auto *loader_group = app.add_option_group("Custom Loader Options", "Options related to the custom loader");
@@ -247,22 +288,18 @@ int main(int argc, char **argv) {
     read_data_group->add_flag("--read-data", read_data, "Read data from the device.");
 
     unsigned long read_data_address = 0x00;
-    read_data_group->add_option("--read-address", read_data_address, "The address where reading data starts, default 0x00")
+    read_data_group->add_option("--read-address", read_data_address, "The address where reading data starts, Default 0x00")
         ->check(CLI::Number)
         ->default_str("0x00");
 
     unsigned long read_data_size = 4096;
-    read_data_group->add_option("--read-size", read_data_size, "The size of the data to read, default 4096")
+    read_data_group->add_option("--read-size", read_data_size, "The size of the data to read, Default 4096")
         ->check(CLI::Number)
         ->default_str("4096");
 
     std::string read_data_file = "data.bin";
-    read_data_group->add_option("--read-file", read_data_file, "The path where read data will be saved, default data.bin")
+    read_data_group->add_option("--read-file", read_data_file, "The path where read data will be saved, Default data.bin")
         ->default_str("data.bin");
-
-    std::vector<std::pair<unsigned long, std::string>> addr_filename_pairs;
-    app.add_option("addr_filename", addr_filename_pairs, "Pairs of addresses followed by binary filenames")
-        ->expected(-1);
 
     CLI11_PARSE(app, argc, argv);
 
@@ -271,27 +308,36 @@ int main(int argc, char **argv) {
     kburn_initialize();
     spdlog_set_log_level(static_cast<int>(log_level));
 
+    if(list_device) {
+        KBurnUSBDeviceList * device_list = list_usb_device_with_vid_pid();
+
+        printf("Available Device: %zd\n", device_list->size());
+
+        for (auto it = device_list->begin(); it != device_list->end(); ++it) {
+            const auto& dev = *it;
+
+            printf("\tdevice: %04X:%04X, path %s, type %s\n", dev.vid, dev.pid, dev.path, dev_type_str(dev.type));
+        }
+        goto _exit;
+    }
+
     size_t file_offset_max = 0;
 
     std::sort(addr_filename_pairs.begin(), addr_filename_pairs.end(),
-              [](const auto& a, const auto& b) {
-                  return a.first < b.first;
-              });
+            [](const AddrFilePartition& a, const AddrFilePartition& b) {
+                return a.address < b.address;
+            });
 
-    if(KBURN_MEDIUM_SPI_NAND == medium_type) {
-        if(0x01 != addr_filename_pairs.size()) {
-            printf("SPI Nand can only set 1 file.\n");
+    if(false == read_data) {
+        if(0x00 == addr_filename_pairs.size()) {
+            printf("the following arguments are required: <address> <filename>\n");
             goto _exit;
         }
-    } else {
-        part_max_size = 0;
-    }
 
-    // Iterate through the pairs and check for overlaps
-    if(false == read_data) {
         for (size_t i = 0; i < addr_filename_pairs.size(); ++i) {
-            unsigned long address = addr_filename_pairs[i].first;
-            const std::string &filename = addr_filename_pairs[i].second;
+            unsigned long address = addr_filename_pairs[i].address;  // Accessing address from struct
+            const std::string &filename = addr_filename_pairs[i].file_path;  // Accessing file path from struct
+            unsigned long partition_max_size = addr_filename_pairs[i].partition_max_size;  // Optional, may be 0 if not set
 
             std::ifstream file(filename, std::ios::binary);
             if (!file) {
@@ -307,12 +353,20 @@ int main(int argc, char **argv) {
                 fileSize = round_up(fileSize, 4096);
             }
 
+            // Check if partition_max_size is set and apply the necessary logic
+            if (partition_max_size != 0) {
+                if (fileSize > partition_max_size) {
+                    printf("Error: File size exceeds partition max size for %s.\n", filename.c_str());
+                    return 1;
+                }
+            }
+
             // Check for overlaps with the next item
             if (i < addr_filename_pairs.size() - 1) { // Ensure not to go out of bounds
-                unsigned long next_address = addr_filename_pairs[i + 1].first;
+                unsigned long next_address = addr_filename_pairs[i + 1].address;  // Accessing next address from struct
                 if (address + fileSize > next_address) {
                     printf("Warning: Overlap detected between %s and %s.\n",
-                        filename.c_str(), addr_filename_pairs[i + 1].second.c_str());
+                        filename.c_str(), addr_filename_pairs[i + 1].file_path.c_str());
                 }
             }
 
@@ -321,24 +375,6 @@ int main(int argc, char **argv) {
 
             // printf("Write %s to 0x%08X, Size: %ld\n", filename.c_str(), address, fileSize);
         }
-    }
-
-    if(list_device) {
-        KBurnUSBDeviceList * device_list = list_usb_device_with_vid_pid();
-
-        printf("Available Device: %zd\n", device_list->size());
-
-        for (auto it = device_list->begin(); it != device_list->end(); ++it) {
-            const auto& dev = *it;
-
-            printf("\tdevice: %04X:%04X, path %s, type %s\n", dev.vid, dev.pid, dev.path, dev_type_str(dev.type));
-        }
-        goto _exit;
-    }
-
-    if((false == read_data) && (0x00 == addr_filename_pairs.size())) {
-        printf("the following arguments are required: <address> <filename>\n");
-        goto _exit;
     }
 
     if(custom_loader) {
@@ -486,16 +522,18 @@ int main(int argc, char **argv) {
                 delete uboot_burner;
                 goto _exit;
             }
-            for (const auto& pair : addr_filename_pairs) {
-                unsigned long address = pair.first;
-                const std::string &filename = pair.second;
+
+            for (const auto& entry : addr_filename_pairs) {
+                unsigned long address = entry.address;  // Accessing address from AddrFilePartition
+                const std::string &filename = entry.file_path;  // Accessing file path from AddrFilePartition
+                unsigned long partition_max_size = entry.partition_max_size;  // Accessing optional partition_max_size
 
                 size_t file_size;
                 char *file_data = readFile(filename, file_size);
 
                 printf("Write %s to 0x%08lX, Size: %zd.\n", filename.c_str(), address, file_size);
 
-                if(false == uboot_burner->write(file_data, file_size, address, part_max_size)) {
+                if(false == uboot_burner->write(file_data, file_size, address, partition_max_size)) {
                     printf("Write %s to 0x%08lX failed.\n", filename.c_str(), address);
 
                     delete uboot_burner;
