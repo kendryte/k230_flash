@@ -308,6 +308,8 @@ int main(int argc, char **argv) {
     kburn_initialize();
     spdlog_set_log_level(static_cast<int>(log_level));
 
+    size_t file_offset_max = 0;
+
     if(list_device) {
         KBurnUSBDeviceList * device_list = list_usb_device_with_vid_pid();
 
@@ -320,8 +322,6 @@ int main(int argc, char **argv) {
         }
         goto _exit;
     }
-
-    size_t file_offset_max = 0;
 
     std::sort(addr_filename_pairs.begin(), addr_filename_pairs.end(),
             [](const AddrFilePartition& a, const AddrFilePartition& b) {
