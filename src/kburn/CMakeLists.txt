@@ -40,11 +40,20 @@ else()
 	set(IS_CI FALSE)
 endif()
 
-execute_process(
-    COMMAND git rev-parse HEAD
-    OUTPUT_VARIABLE GIT_COMMIT
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
+# Fetch the GIT_COMMIT environment variable
+set(GIT_COMMIT_ENV $ENV{GIT_COMMIT})
+
+# Fallback in case the environment variable is not set
+if(NOT GIT_COMMIT_ENV)
+    execute_process(
+        COMMAND git rev-parse HEAD
+        OUTPUT_VARIABLE GIT_COMMIT_ENV
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+endif()
+
+# Print the commit hash
+message(STATUS "GIT_COMMIT = ${GIT_COMMIT_ENV}")
 
 if(NOT DEFINED K230_FLASH_VERSION_STRING)
     set(K230_FLASH_VERSION_STRING "0.0.1")

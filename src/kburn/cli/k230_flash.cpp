@@ -202,7 +202,7 @@ std::istream& operator>>(std::istream& in, AddrFilePartition& value) {
         in.setstate(std::ios::failbit);
         return in;
     }
-    value.address = std::stoul(token);  // Convert address from string to unsigned long
+    value.address = std::stoul(token, nullptr, 0);  // Convert address from string to unsigned long
 
     // Parse the file path (second part)
     if (!std::getline(ss, token, ',')) {
@@ -213,7 +213,7 @@ std::istream& operator>>(std::istream& in, AddrFilePartition& value) {
 
     // Parse the partition max size (third part, optional)
     if (std::getline(ss, token, ',')) {
-        value.partition_max_size = std::stoul(token);  // Convert partition max size
+        value.partition_max_size = std::stoul(token, nullptr, 0);  // Convert partition max size
     } else {
         value.partition_max_size = 0;  // Default to 0 if not provided
     }
@@ -330,7 +330,7 @@ int main(int argc, char **argv) {
 
     if(false == read_data) {
         if(0x00 == addr_filename_pairs.size()) {
-            printf("the following arguments are required: <address> <filename>\n");
+            printf("the following arguments are required: <address> <filename> [partition_max_size]\n");
             goto _exit;
         }
 
@@ -367,6 +367,10 @@ int main(int argc, char **argv) {
                 if (address + fileSize > next_address) {
                     printf("Warning: Overlap detected between %s and %s.\n",
                         filename.c_str(), addr_filename_pairs[i + 1].file_path.c_str());
+                }
+
+                if(spdlog::level::level_enum::debug >= log_level) {
+                    printf("address %u file %s length %u, next address %u\n", address, filename.c_str(), fileSize, next_address);
                 }
             }
 
