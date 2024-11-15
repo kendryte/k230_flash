@@ -787,6 +787,14 @@ bool K230UBOOTBurner::read(void *data, size_t size, uint64_t address) {
   return true;
 }
 
+bool K230UBOOTBurner::erase(uint64_t address, size_t size) {
+  spdlog::trace("%s", __func__);
+
+  int retry = size / 4096;
+
+  return kburn_erase(&kburn_, address, size, retry);
+}
+
 }; // namespace K230
 
 }; // namespace Kendryte_Burning_Tool

@@ -88,6 +88,8 @@ public:
 
   bool read(void *data, size_t size, uint64_t address);
 
+  bool erase(uint64_t address, size_t size);
+
 private:
   bool probe_succ = false;
   uint64_t out_chunk_size = 512;

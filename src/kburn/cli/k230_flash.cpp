@@ -301,6 +301,22 @@ int main(int argc, char **argv) {
     read_data_group->add_option("--read-file", read_data_file, "The path where read data will be saved, Default data.bin")
         ->default_str("data.bin");
 
+    // erase
+    auto *erase_group = app.add_option_group("Erase Medium Options", "Options related to the medium erase");
+
+    bool erase_medium = false;
+    erase_group->add_flag("--erase-medium", erase_medium, "Erase the medium.");
+
+    unsigned long erase_medium_address = 0x00;
+    erase_group->add_option("--erase-address", erase_medium_address, "The address where erase medium starts, Default 0x00")
+        ->check(CLI::Number)
+        ->default_str("0x00");
+
+    unsigned long erase_medium_size = 4096;
+    erase_group->add_option("--erase-size", erase_medium_size, "The size of the meidum to erase, Default 0x00")
+        ->check(CLI::Number)
+        ->default_str("0x00");
+
     CLI11_PARSE(app, argc, argv);
 
     printf("K230 Flash Start.\n");
@@ -328,7 +344,7 @@ int main(int argc, char **argv) {
                 return a.address < b.address;
             });
 
-    if(false == read_data) {
+    if((false == read_data) && (false == erase_medium)) {
         if(0x00 == addr_filename_pairs.size()) {
             printf("the following arguments are required: <address> <filename> [partition_max_size]\n");
             goto _exit;
@@ -519,7 +535,30 @@ int main(int argc, char **argv) {
 
             // Clean up resources
             fclose(file);
-        } else {
+        } else if(erase_medium) {
+            if(0x00 != erase_medium_size) {
+                printf("Erase 0x%08lX to 0x%08lX start.\n", erase_medium_address, erase_medium_address + erase_medium_size);
+
+                // Get the start time point
+                auto start = std::chrono::high_resolution_clock::now();
+
+                if(false == uboot_burner->erase(erase_medium_address, erase_medium_size)) {
+                    printf("Erase 0x%08lX to 0x%08lX failed.\n", erase_medium_address, erase_medium_address + erase_medium_size);
+
+                    delete uboot_burner;
+                    goto _exit;
+                }
+                // Get the end time point
+                auto end = std::chrono::high_resolution_clock::now();
+
+                // Calculate the duration
+                std::chrono::duration<double> elapsed = end - start;
+
+                printf("Erase 0x%08lX to 0x%08lX done, use %.2f sec.\n", erase_medium_address, erase_medium_address + erase_medium_size, elapsed.count());
+            } else {
+                printf("Erase size is 0.\n");
+            }
+        }else {
             if(file_offset_max > medium_info->capacity) {
                 printf("Files exceed the capacity of meidum.\n");
 
