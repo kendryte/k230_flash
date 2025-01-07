@@ -353,7 +353,7 @@ void KburnKdImage::get_parts_from_temp(void) {
             std::string partName = filename.substr(0, offsetPos);
             std::string offsetStr = filename.substr(offsetPos + 1); // Skip "_"
             uint64_t partOffset = std::stoull(offsetStr, nullptr, 16); // Convert hex string to uint64_t
-            
+
             spdlog::debug("filename {}, partName {}, partOffset {}({})", filename, partName, partOffset, offsetStr);
 
             // Read the corresponding .sha256 file

@@ -338,6 +338,16 @@ int main(int argc, char **argv) {
             }
 
             file_offset_max = get_kdimage_max_offset();
+
+            for (auto it = kdimg_items->begin(); it != kdimg_items->end(); ++it) {
+                const struct KburnImageItem_t item = *it;
+
+                if(item.partName == std::string("loader")) {
+                    custom_loader = true;
+                    loader_file = item.fileName;
+                    load_address = 0x80360000;
+                }
+            }
         } else {
             struct KburnImageItem_t item;
 
