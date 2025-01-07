@@ -91,6 +91,7 @@ target_compile_definitions(kburn PRIVATE
 set_target_properties(kburn PROPERTIES
     LANGUAGE CXX
     LINKER_LANGUAGE CXX
+    CXX_STANDARD 17
 	PREFIX lib
 )
 
