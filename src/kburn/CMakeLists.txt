@@ -71,6 +71,7 @@ file(GLOB K230_SRCS "burner_k230/*.cpp")
 
 set(SRCS
     kburn.cpp
+    kdimage.cpp
     ${K230_SRCS}
 )
 

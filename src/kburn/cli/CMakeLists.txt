@@ -2,6 +2,14 @@ cmake_minimum_required(VERSION 3.4...3.18)
 
 option(BUILD_WITH_MINGW "Build in Dokcer MingW" OFF)
 
+if(NOT DEFINED CMAKE_BUILD_TYPE)
+	set(CMAKE_BUILD_TYPE "Release")
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "")
+	set(CMAKE_BUILD_TYPE "Release")
+endif()
+
 project(k230_flash)
 
 add_executable(${PROJECT_NAME} k230_flash.cpp)

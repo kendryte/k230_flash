@@ -98,8 +98,6 @@ private:
 
 class KBURN_API KBurn {
 public:
-  static class KBurn *_instance;
-
   KBurn();
   ~KBurn();
 
@@ -112,6 +110,8 @@ public:
   bool can_detach() { return usb_can_detach_kernel_driver; };
 
 private:
+  static KBurn *_instance;
+
   struct libusb_context *usb_ctx;
   bool usb_can_detach_kernel_driver = false;
 };

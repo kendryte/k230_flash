@@ -5,15 +5,16 @@
 #include <iostream>
 #include <chrono>
 #include <iomanip>
-#include <iomanip>
 
 #include <stdexcept>
 
 #include <cstdio>
+#include <cctype>    // for std::tolower
 
 #include <CLI/CLI.hpp>
 
 #include <kburn.h>
+#include <kdimage.h>
 #include <k230/kburn_k230.h>
 
 using namespace std;
@@ -86,6 +87,18 @@ char* readFile(const std::string& filename, size_t& fileSize) {
     file.close();
 
     return buffer; // Return the buffer
+}
+
+bool hasSuffixCaseInsensitive(std::string filename, std::string suffix) {
+    // Convert both strings to lowercase
+    std::transform(filename.begin(), filename.end(), filename.begin(), ::tolower);
+    std::transform(suffix.begin(), suffix.end(), suffix.begin(), ::tolower);
+
+    // Perform the suffix check
+    if (filename.length() >= suffix.length()) {
+        return filename.compare(filename.length() - suffix.length(), suffix.length(), suffix) == 0;
+    }
+    return false;
 }
 
 struct kburn_usb_dev_info open_device(const std::string& path = "", bool checkisUboot = false) {
@@ -183,54 +196,22 @@ KBurner::progress_fn_t progress = [](void* ctx, size_t iteration, size_t total) 
     fflush(stdout);  // Flush the output to update the terminal
 };
 
-struct AddrFilePartition {
-    unsigned long address;
-    std::string file_path;
-    unsigned long partition_max_size = 0;  // default value
-};
-
-// Overload the >> operator for AddrFilePartition
-std::istream& operator>>(std::istream& in, AddrFilePartition& value) {
-    std::string input;
-    std::getline(in, input);  // Read the entire input line
-
-    std::stringstream ss(input);
-    std::string token;
-
-    // Parse the address (first part)
-    if (!std::getline(ss, token, ',')) {
-        in.setstate(std::ios::failbit);
-        return in;
-    }
-    value.address = std::stoul(token, nullptr, 0);  // Convert address from string to unsigned long
-
-    // Parse the file path (second part)
-    if (!std::getline(ss, token, ',')) {
-        in.setstate(std::ios::failbit);
-        return in;
-    }
-    value.file_path = token;  // Assign file path
-
-    // Parse the partition max size (third part, optional)
-    if (std::getline(ss, token, ',')) {
-        value.partition_max_size = std::stoul(token, nullptr, 0);  // Convert partition max size
-    } else {
-        value.partition_max_size = 0;  // Default to 0 if not provided
-    }
-
-    return in;
-}
-
 int main(int argc, char **argv) {
+    size_t file_offset_max = 0;
     struct kburn_usb_dev_info dev;
+    KburnImageItemList *kdimg_items;
 
     CLI::App app{"Kendryte Burning Tool"};
 
     bool auto_reboot = false;
-    app.add_flag("--auto-reboot", auto_reboot, "Enable automatic reboot.");
+    app.add_flag("--auto-reboot", auto_reboot, "Enable automatic reboot after flashing.");
 
     bool list_device = false;
-    app.add_flag("-l,--list-device", list_device, "List devices");
+    app.add_flag("-l,--list-device", list_device, "List connected devices");
+
+    std::string device_address;
+    app.add_option("-d,--device-address", device_address, "Device address (format: 1-1 or 3-1), which is the result from '--list-device'")
+        ->default_str("");
 
     enum KBurnMediumType medium_type = KBURN_MEDIUM_EMMC;
     std::map<std::string, KBurnMediumType> medium_map = {
@@ -240,13 +221,9 @@ int main(int argc, char **argv) {
         {"SPI_NOR", KBURN_MEDIUM_SPI_NOR},
         {"OTP", KBURN_MEDIUM_OTP}
     };
-    app.add_option("-m,--medium-type", medium_type, "Specify the medium type, Default EMMC")
+    app.add_option("-m,--medium-type", medium_type, "Specify the medium type")
         ->transform(CLI::CheckedTransformer(medium_map, CLI::ignore_case))
         ->default_str("EMMC");
-
-    std::string device_address;
-    app.add_option("-d,--device-address", device_address, "Device address (format: 1-1 or 3-1), which is the result from '--list-device'")
-        ->default_str("");
 
     spdlog::level::level_enum log_level = spdlog::level::level_enum::warn;
     std::map<std::string, spdlog::level::level_enum> log_level_map = {
@@ -258,23 +235,26 @@ int main(int argc, char **argv) {
         {"CRITICAL", spdlog::level::level_enum::critical},
         {"OFF", spdlog::level::level_enum::off},
     };
-    app.add_option("--log-level", log_level, "Set the logging level, Default WARN")
+    app.add_option("--log-level", log_level, "Set the logging level")
         ->transform(CLI::CheckedTransformer(log_level_map, CLI::ignore_case))
         ->default_str("WARN");
 
-    std::vector<AddrFilePartition> addr_filename_pairs;
+    unsigned long write_data_address = 0x00;
+    app.add_option("-a,--address", write_data_address, "The address where write data starts")
+        ->check(CLI::Number)
+        ->default_val(write_data_address);  // Use the variable itself for default value
 
-    app.add_option("addr_filename", addr_filename_pairs, "Address, file path, and optional partition max size")
-        ->expected(-1);
+    std::string write_file;
+    app.add_option("-f,--file", write_file, "The path of data write to medium");
 
     // loader
     auto *loader_group = app.add_option_group("Custom Loader Options", "Options related to the custom loader");
 
     bool custom_loader = false;
-    loader_group->add_flag("--custom-loader", custom_loader, "Enable custom loader");
+    loader_group->add_flag("--custom-loader", custom_loader, "Enable use custom loader");
 
     unsigned long load_address = 0x80360000;
-    loader_group->add_option("--load-address", load_address, "The address where will loader run, Default 0x80360000")
+    loader_group->add_option("--load-address", load_address, "The address where will loader run")
         ->check(ValidLoadAddress)
         ->default_str("0x80360000");
 
@@ -288,12 +268,12 @@ int main(int argc, char **argv) {
     read_data_group->add_flag("--read-data", read_data, "Read data from the device.");
 
     unsigned long read_data_address = 0x00;
-    read_data_group->add_option("--read-address", read_data_address, "The address where reading data starts, Default 0x00")
+    read_data_group->add_option("--read-address", read_data_address, "The address where reading data starts")
         ->check(CLI::Number)
         ->default_str("0x00");
 
     unsigned long read_data_size = 4096;
-    read_data_group->add_option("--read-size", read_data_size, "The size of the data to read, Default 4096")
+    read_data_group->add_option("--read-size", read_data_size, "The size of the data to read")
         ->check(CLI::Number)
         ->default_str("4096");
 
@@ -308,12 +288,12 @@ int main(int argc, char **argv) {
     erase_group->add_flag("--erase-medium", erase_medium, "Erase the medium.");
 
     unsigned long erase_medium_address = 0x00;
-    erase_group->add_option("--erase-address", erase_medium_address, "The address where erase medium starts, Default 0x00")
+    erase_group->add_option("--erase-address", erase_medium_address, "The address where erase medium starts")
         ->check(CLI::Number)
         ->default_str("0x00");
 
     unsigned long erase_medium_size = 4096;
-    erase_group->add_option("--erase-size", erase_medium_size, "The size of the meidum to erase, Default 0x00")
+    erase_group->add_option("--erase-size", erase_medium_size, "The size of the meidum to erase")
         ->check(CLI::Number)
         ->default_str("0x00");
 
@@ -323,8 +303,6 @@ int main(int argc, char **argv) {
 
     kburn_initialize();
     spdlog_set_log_level(static_cast<int>(log_level));
-
-    size_t file_offset_max = 0;
 
     if(list_device) {
         KBurnUSBDeviceList * device_list = list_usb_device_with_vid_pid();
@@ -339,61 +317,39 @@ int main(int argc, char **argv) {
         goto _exit;
     }
 
-    std::sort(addr_filename_pairs.begin(), addr_filename_pairs.end(),
-            [](const AddrFilePartition& a, const AddrFilePartition& b) {
-                return a.address < b.address;
-            });
-
     if((false == read_data) && (false == erase_medium)) {
-        if(0x00 == addr_filename_pairs.size()) {
-            printf("the following arguments are required: <address> <filename> [partition_max_size]\n");
+        if(0x00 == write_file.length()) {
+            printf("-f/--file argument needed\n");
             goto _exit;
         }
 
-        for (size_t i = 0; i < addr_filename_pairs.size(); ++i) {
-            unsigned long address = addr_filename_pairs[i].address;  // Accessing address from struct
-            const std::string &filename = addr_filename_pairs[i].file_path;  // Accessing file path from struct
-            unsigned long partition_max_size = addr_filename_pairs[i].partition_max_size;  // Optional, may be 0 if not set
+        if(!fileExists(write_file)) {
+            printf("file %s not exist\n", write_file.c_str());
+            goto _exit;
+        }
+        file_offset_max = std::filesystem::file_size(write_file);
 
-            std::ifstream file(filename, std::ios::binary);
-            if (!file) {
-                printf("Error: File not found - %s.\n", filename.c_str());
-                return 1;
+        if(hasSuffixCaseInsensitive(write_file, std::string(".kdimg"))) {
+            kdimg_items = get_kdimage_items(write_file);
+
+            if(!kdimg_items) {
+                printf("Parse *.kdimg failed.\n");
+                goto _exit;
             }
 
-            file.seekg(0, std::ios::end);
-            size_t fileSize = file.tellg();
-            file.seekg(0, std::ios::beg); // Reset the file pointer to the beginning if needed
+            file_offset_max = get_kdimage_max_offset();
+        } else {
+            struct KburnImageItem_t item;
 
-            if(4096 <= fileSize) {
-                fileSize = round_up(fileSize, 4096);
-            }
+            item.partName = std::string("image");
+            item.partOffset = 0x00;
+            item.partSize = file_offset_max;
+            item.partEraseSize = 0x00;
+            item.fileName = write_file;
+            item.fileSize = file_offset_max;
 
-            // Check if partition_max_size is set and apply the necessary logic
-            if (partition_max_size != 0) {
-                if (fileSize > partition_max_size) {
-                    printf("Error: File size exceeds partition max size for %s.\n", filename.c_str());
-                    return 1;
-                }
-            }
-
-            // Check for overlaps with the next item
-            if (i < addr_filename_pairs.size() - 1) { // Ensure not to go out of bounds
-                unsigned long next_address = addr_filename_pairs[i + 1].address;  // Accessing next address from struct
-                if (address + fileSize > next_address) {
-                    printf("Warning: Overlap detected between %s and %s.\n",
-                        filename.c_str(), addr_filename_pairs[i + 1].file_path.c_str());
-                }
-
-                if(spdlog::level::level_enum::debug >= log_level) {
-                    printf("address %u file %s length %u, next address %u\n", address, filename.c_str(), fileSize, next_address);
-                }
-            }
-
-            // Update max file offset
-            file_offset_max = std::max(file_offset_max, address + fileSize);
-
-            // printf("Write %s to 0x%08X, Size: %ld\n", filename.c_str(), address, fileSize);
+            kdimg_items = new KburnImageItemList();
+            kdimg_items->push(item);
         }
     }
 
@@ -476,7 +432,7 @@ int main(int argc, char **argv) {
         }
 
         K230::K230UBOOTBurner *uboot_burner = reinterpret_cast<K230::K230UBOOTBurner *>(burner);
-        
+
         uboot_burner->register_progress_fn(progress, NULL);
 
         uboot_burner->set_medium_type(medium_type);
@@ -566,23 +522,60 @@ int main(int argc, char **argv) {
                 goto _exit;
             }
 
-            for (const auto& entry : addr_filename_pairs) {
-                unsigned long address = entry.address;  // Accessing address from AddrFilePartition
-                const std::string &filename = entry.file_path;  // Accessing file path from AddrFilePartition
-                unsigned long partition_max_size = entry.partition_max_size;  // Accessing optional partition_max_size
+            for (auto it = kdimg_items->begin(); it != kdimg_items->end(); ++it) {
+                const struct KburnImageItem_t item = *it;
 
                 size_t file_size;
-                char *file_data = readFile(filename, file_size);
+                char *file_data = readFile(item.fileName, file_size);
 
-                printf("Write %s to 0x%08lX, Size: %zd.\n", filename.c_str(), address, file_size);
+                printf("Write %s to 0x%08lX, Size: %zd.\n", item.fileName.c_str(), item.partOffset, file_size);
 
-                if(false == uboot_burner->write(file_data, file_size, address, partition_max_size)) {
-                    printf("Write %s to 0x%08lX failed.\n", filename.c_str(), address);
+                if(false == uboot_burner->write(file_data, file_size, item.partOffset, item.partSize)) {
+                    printf("Write %s to 0x%08lX failed.\n", item.fileName.c_str(), item.partOffset);
 
                     delete uboot_burner;
                     goto _exit;
                 }
                 delete []file_data;
+
+                // Erase remaining space if partEraseSize is specified
+                if (item.partEraseSize > 0) {
+                    uint64_t _medium_erase_size = medium_info->erase_size;
+                    if (_medium_erase_size == 0) {
+                        printf("Error: Unable to get medium erase size.\n");
+                        goto _exit;
+                    }
+
+                    // Calculate the remaining space to erase
+                    uint64_t _erase_start = item.partOffset + file_size;
+                    uint64_t _erase_end = item.partOffset + item.partEraseSize;
+
+                    // Align erase start to medium erase size (round up)
+                    if (_erase_start % _medium_erase_size != 0) {
+                        _erase_start = ((_erase_start + _medium_erase_size - 1) / _medium_erase_size) * _medium_erase_size;
+                    }
+
+                    // Align erase end to medium erase size (round down)
+                    if (_erase_end % _medium_erase_size != 0) {
+                        _erase_end = (_erase_end / _medium_erase_size) * _medium_erase_size;
+                    }
+
+                    // Calculate the erase size
+                    uint64_t _erase_size = (_erase_end > _erase_start) ? (_erase_end - _erase_start) : 0;
+
+                    if (_erase_size > 0) {
+                        printf("Erasing remaining space from 0x%08lX to 0x%08lX, Size: %lu.\n", _erase_start, _erase_end, _erase_size);
+
+                        if (uboot_burner->erase(_erase_start, _erase_size)) {
+                            printf("Erase successful.\n");
+                        } else {
+                            printf("Erase failed.\n");
+                            goto _exit;
+                        }
+                    } else {
+                        printf("No remaining space to erase.\n");
+                    }
+                }
             }
         }
 

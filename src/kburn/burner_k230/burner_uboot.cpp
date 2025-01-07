@@ -257,6 +257,8 @@ static bool kburn_send_cmd(kburn_t *kburn, enum kburn_pkt_cmd cmd, void *data,
 }
 
 void kburn_nop(struct kburn_t *kburn) {
+  uint32_t timeout_ms = kburn->medium_info.timeout_ms;
+
   spdlog::debug("issue a nop command, clear device error status");
 
   // issue a command, clear device state
@@ -266,7 +268,9 @@ void kburn_nop(struct kburn_t *kburn) {
 
   /* read last packet */
   struct kburn_usb_pkt_wrap csw;
+  kburn->medium_info.timeout_ms = 50;
   kburn_read_data(kburn, &csw, sizeof(csw), NULL);
+  kburn->medium_info.timeout_ms = timeout_ms;
 
   kburn_send_cmd(kburn, KBURN_CMD_NONE, NULL, 0, NULL, NULL);
 
