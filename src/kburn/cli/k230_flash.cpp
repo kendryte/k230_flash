@@ -355,6 +355,7 @@ int main(int argc, char **argv) {
             item.partOffset = 0x00;
             item.partSize = file_offset_max;
             item.partEraseSize = 0x00;
+            item.partFlag = 0x00;
             item.fileName = write_file;
             item.fileSize = file_offset_max;
 
@@ -535,18 +536,25 @@ int main(int argc, char **argv) {
             for (auto it = kdimg_items->begin(); it != kdimg_items->end(); ++it) {
                 const struct KburnImageItem_t item = *it;
 
-                size_t file_size;
-                char *file_data = readFile(item.fileName, file_size);
-
-                printf("Write %s to 0x%08lX, Size: %zd.\n", item.fileName.c_str(), item.partOffset, file_size);
-
-                if(false == uboot_burner->write(file_data, file_size, item.partOffset, item.partSize)) {
-                    printf("Write %s to 0x%08lX failed.\n", item.fileName.c_str(), item.partOffset);
-
+                std::ifstream file(item.fileName, std::ios::binary);
+                if (!file.is_open()) {
+                    printf("Failed to open %s\n", item.fileName.c_str());
                     delete uboot_burner;
                     goto _exit;
                 }
-                delete []file_data;
+
+                file.seekg(0, std::ios::end);
+                size_t file_size = static_cast<size_t>(file.tellg());
+                file.seekg(0, std::ios::beg);
+
+                printf("Write %s to 0x%08lX, Size: %zd.\n", item.fileName.c_str(), item.partOffset, file_size);
+
+                if (false == uboot_burner->write_stream(file, file_size, item.partOffset, item.partSize, item.partFlag)) {
+                    printf("Write %s to 0x%08lX failed.\n", item.fileName.c_str(), item.partOffset);
+                    delete uboot_burner;
+                    goto _exit;
+                }
+                file.close();
 
                 // Erase remaining space if partEraseSize is specified
                 if (item.partEraseSize > 0) {

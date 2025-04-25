@@ -317,6 +317,7 @@ bool KburnKdImage::extract_parts(void) {
         item.partOffset = part.part_offset;
         item.partSize = part.part_max_size;
         item.partEraseSize = part.part_erase_size;
+        item.partFlag = part.part_flag;
         item.fileName = tempFileName;
         item.fileSize = part.part_size;
 
@@ -430,6 +431,7 @@ void KburnKdImage::convert_parts_to_items(void) {
         item.partOffset = part.part_offset;
         item.partSize = part.part_max_size;
         item.partEraseSize = part.part_erase_size;
+        item.partFlag = part.part_flag;
         item.fileName = tempFileName;
         item.fileSize = part.part_size;
 

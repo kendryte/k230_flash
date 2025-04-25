@@ -440,8 +440,8 @@ bool kburn_erase(struct kburn_t *kburn, uint64_t offset, uint64_t size,
   return true == kburn_parse_resp(&csw, kburn, KBURN_CMD_ERASE_LBA, NULL, NULL);
 }
 
-bool kburn_write_start(struct kburn_t *kburn, uint64_t offset, uint64_t size, uint64_t max) {
-  uint64_t cfg[3] = {offset, size, max};
+bool kburn_write_start(struct kburn_t *kburn, uint64_t offset, uint64_t size, uint64_t max, uint64_t part_flag) {
+  uint64_t cfg[4] = {offset, size, max, part_flag};
 
   if ((offset + size) > kburn->medium_info.capacity) {
     spdlog::error("kburn write medium exceed");
@@ -695,22 +695,35 @@ bool K230UBOOTBurner::reboot(void) {
   return true;
 }
 
-bool K230UBOOTBurner::write(const void *data, size_t size, uint64_t address) {
-  return write(data, size, address, 0);
-}
-
-bool K230UBOOTBurner::write(const void *data, size_t size, uint64_t address, uint64_t max) {
+bool K230UBOOTBurner::write_stream(std::ifstream& file_stream, size_t size, uint64_t address, uint64_t max, uint64_t flag) {
   uint64_t bytes_per_send, bytes_sent = 0, total_size = 0;
 
   size_t blk_size = kburn_.medium_info.blk_size;
   size_t aligned_size = (size + blk_size - 1) / blk_size * blk_size;
+  size_t chunk_size = out_chunk_size;
 
-  wr_buffer.resize(aligned_size, 0);
-  memcpy(wr_buffer.data(), reinterpret_cast<const uint8_t*>(data), size);
+  uint64_t flag_flag, flag_val1, flag_val2;
 
-  if (false == kburn_write_start(&kburn_, address, aligned_size, max)) {
-    spdlog::error("uboot burner, start write failed");
-    return false;
+  flag_flag = KBURN_FLAG_FLAG(flag);
+  flag_val1 = KBURN_FLAG_VAL1(flag);
+  flag_val2 = KBURN_FLAG_VAL2(flag);
+
+  if ((KBURN_FLAG_SPI_NAND_WRITE_WITH_OOB == flag_flag) &&
+      (KBURN_MEDIUM_SPI_NAND == kburn_.medium_info.type)) {
+      uint64_t page_size_with_oob = flag_val1 + flag_val2;
+
+      blk_size = page_size_with_oob;
+      aligned_size = (size + blk_size - 1) / blk_size * blk_size;
+      chunk_size = ((chunk_size / page_size_with_oob) - 1) * page_size_with_oob;
+  }
+
+  if (aligned_size != size) {
+      spdlog::warn("uboot burner, aligned write size from {} to {}", size, aligned_size);
+  }
+
+  if (!kburn_write_start(&kburn_, address, aligned_size, max, flag)) {
+      spdlog::error("uboot burner, start write failed");
+      return false;
   }
 
   do_sleep(100);
@@ -720,29 +733,30 @@ bool K230UBOOTBurner::write(const void *data, size_t size, uint64_t address, uin
 
   log_progress(0, total_size);
 
-  do {
-    if ((total_size - bytes_sent) > out_chunk_size) {
-      bytes_per_send = out_chunk_size;
-    } else {
-      bytes_per_send = (total_size - bytes_sent);
-    }
+  std::vector<uint8_t> buffer(chunk_size, 0);
 
-    if (false ==
-        kburn_write_chunk(&kburn_, wr_buffer.data() + bytes_sent, bytes_per_send)) {
-      spdlog::error("write failed @ {}", bytes_sent);
+  while (bytes_sent < total_size) {
+      bytes_per_send = std::min(chunk_size, total_size - bytes_sent);
+      file_stream.read(reinterpret_cast<char*>(buffer.data()), bytes_per_send);
 
+      std::streamsize read_count = file_stream.gcount();
+      if (read_count < static_cast<std::streamsize>(bytes_per_send)) {
+          // Pad with zeroes if not enough data (end of file)
+          std::fill(buffer.begin() + read_count, buffer.begin() + bytes_per_send, 0);
+      }
+
+      if (!kburn_write_chunk(&kburn_, buffer.data(), bytes_per_send)) {
+          spdlog::error("write failed @ {}", bytes_sent);
+          return false;
+      }
+
+      bytes_sent += bytes_per_send;
+      log_progress(bytes_sent, total_size);
+  }
+
+  if (!kbrun_write_end(&kburn_)) {
+      spdlog::error("uboot burner, finish write failed");
       return false;
-    }
-
-    bytes_sent += bytes_per_send;
-
-    log_progress(bytes_sent, total_size);
-
-  } while (bytes_sent < total_size);
-
-  if (false == kbrun_write_end(&kburn_)) {
-    spdlog::error("uboot burner, finsh write failed");
-    return false;
   }
 
   return true;

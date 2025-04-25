@@ -14,6 +14,12 @@
 
 namespace Kendryte_Burning_Tool {
 
+#define KBURN_FLAG_SPI_NAND_WRITE_WITH_OOB    (1024)
+
+#define KBURN_FLAG_FLAG(flg)    ((flg >> 48) & 0xffff)
+#define KBURN_FLAG_VAL1(flg)    ((flg >> 16) & 0xffffffff)
+#define KBURN_FLAG_VAL2(flg)    (flg & 0xffff)
+
 #define KBURN_USB_PATH_BUFERR_SIZE (8)
 
 #if defined(_WIN32)
@@ -136,6 +142,7 @@ public:
   }
 
   virtual bool write(const void *data, size_t size, uint64_t address) = 0;
+  virtual bool write_stream(std::ifstream& file_stream, size_t size, uint64_t address, uint64_t max, uint64_t flag) = 0;
 
 protected:
   struct kburn_usb_node *dev_node;

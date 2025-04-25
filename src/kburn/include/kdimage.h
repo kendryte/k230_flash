@@ -37,7 +37,7 @@ struct alignas(256) kd_img_part_t {
     uint32_t part_size;     // align to 4096
     uint32_t part_erase_size;
     uint32_t part_max_size;
-    uint32_t part_flag;
+    uint64_t part_flag;
 
     uint32_t part_content_offset;
     uint32_t part_content_size;
@@ -67,6 +67,7 @@ struct KburnImageItem_t {
 	uint32_t partOffset;
 	uint32_t partSize;
 	uint32_t partEraseSize;
+    uint64_t partFlag;
 
 	std::string fileName;
 	uint32_t fileSize;
@@ -169,10 +170,28 @@ public:
     }
 
     size_t max_offset(void) {
-        size_t curr, max = 0x00;
+        size_t size, curr, max = 0x00;
 
-        for(const auto &part : _curr_parts) {
-            curr = part.part_offset + part.part_max_size;
+        for(const auto &item : _items) {
+            size = item.partSize;
+            if(0x00 == size) {
+                size = item.fileSize;
+            }
+            
+            if(0x00 != item.partFlag) {
+                uint64_t flag_flag, flag_val1, flag_val2;
+
+                flag_flag = KBURN_FLAG_FLAG(item.partFlag);
+                flag_val1 = KBURN_FLAG_VAL1(item.partFlag);
+                flag_val2 = KBURN_FLAG_VAL2(item.partFlag);
+
+                if(KBURN_FLAG_SPI_NAND_WRITE_WITH_OOB == flag_flag) {
+                    size /= (flag_val1 + flag_val2);
+                    size *= flag_val1;
+                }
+            }
+
+            curr = item.partOffset + size;
             if(curr > max) {
                 max = curr;
             }

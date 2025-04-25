@@ -1,6 +1,7 @@
 #pragma once
 
 #include "kburn.h"
+#include <fstream>
 
 namespace Kendryte_Burning_Tool {
 
@@ -32,6 +33,10 @@ public:
   bool get_loader(const char **loader, size_t *size);
 
   bool write(const void *data, size_t size, uint64_t address = 0x80360000);
+  bool write_stream(std::ifstream& file_stream, size_t size, uint64_t address, uint64_t max, uint64_t flag) {
+    spdlog::error("brom burner, not support write stream");
+    return false;
+  }
 
 private:
   bool k230_brom_set_data_addr(uint64_t address = 0x80360000);
@@ -83,8 +88,12 @@ public:
     return static_cast<uint8_t>(kburn_.medium_info.valid);
   }
 
-  bool write(const void *data, size_t size, uint64_t address);
-  bool write(const void *data, size_t size, uint64_t address, uint64_t max);
+  bool write(const void *data, size_t size, uint64_t address) {
+    spdlog::error("uboot burner, not support write data");
+    return false;
+  }
+
+  bool write_stream(std::ifstream& file_stream, size_t size, uint64_t address, uint64_t max, uint64_t flag);
 
   bool read(void *data, size_t size, uint64_t address);
 
