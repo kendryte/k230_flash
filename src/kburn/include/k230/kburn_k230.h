@@ -60,6 +60,8 @@ struct kburn_t {
 
   char error_msg[128];
 
+  int loader_version;
+
   int ep_in, ep_out;
   uint16_t ep_out_mps;
   uint64_t capacity;

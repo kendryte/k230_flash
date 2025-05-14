@@ -190,7 +190,41 @@ bool KburnKdImage::parse_parts(void) {
     _curr_parts.clear();
     for (size_t i = 0; i < sizePartsContent; i += sizeof(kd_img_part_t)) {
         kd_img_part_t part;
-        std::memcpy(&part, part_table_content.data() + i, sizeof(kd_img_part_t));
+
+        if(0x02 <= _header.img_hdr_version) {
+            std::memcpy(&part, part_table_content.data() + i, sizeof(kd_img_part_t));
+        } else {
+            // Version 0 (v1) - need conversion
+            struct alignas(256) v1_part {
+                uint32_t part_magic;
+                uint32_t part_offset;
+                uint32_t part_size;
+                uint32_t part_erase_size;
+                uint32_t part_max_size;
+                uint32_t part_flag; // Different from v2
+
+                uint32_t part_content_offset;
+                uint32_t part_content_size;
+                uint8_t  part_content_sha256[32];
+                char part_name[32];
+            } v1_part;
+
+            static_assert(sizeof(struct v1_part) == 256, "v1_part size mismatch");
+
+            std::memcpy(&v1_part, part_table_content.data() + i, sizeof(v1_part));
+
+            // Convert v1 to v2
+            part.part_magic = v1_part.part_magic;
+            part.part_offset = v1_part.part_offset;
+            part.part_size = v1_part.part_size;
+            part.part_erase_size = v1_part.part_erase_size;
+            part.part_max_size = v1_part.part_max_size;
+            part.part_flag = v1_part.part_flag; // uint32_t to uint64_t (safe)
+            part.part_content_offset = v1_part.part_content_offset;
+            part.part_content_size = v1_part.part_content_size;
+            std::memcpy(part.part_content_sha256, v1_part.part_content_sha256, 32);
+            std::memcpy(part.part_name, v1_part.part_name, 32);
+        }
 
         if (part.part_magic != KDIMG_PART_MAGIC) {
             spdlog::error("Error: Invalid part header magic!");

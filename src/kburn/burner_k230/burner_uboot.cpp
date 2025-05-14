@@ -106,6 +106,31 @@ static int __get_endpoint(kburn_t *kburn) {
   return LIBUSB_SUCCESS;
 }
 
+static int kburn_probe_loader_version(kburn_t *kburn)
+{
+  int rc = -1;
+  uint32_t version = 0;
+
+  rc = libusb_control_transfer(
+    /* dev_handle    */ kburn->node->handle,
+    /* bmRequestType */ (uint8_t)(LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE),
+    /* bRequest      */ 0,
+    /* wValue        */ (uint16_t)(0x0001),
+    /* wIndex        */ 0,
+    /* Data          */ (uint8_t *)&version,
+    /* wLength       */ sizeof(version),
+    /* timeout       */ kburn->medium_info.timeout_ms);
+
+  if (rc != LIBUSB_SUCCESS) {
+    spdlog::error("usb issue control transfer failed, {}({})", rc, libusb_error_name(rc));
+    return 0;
+  }
+
+  spdlog::debug("loader version is {}", version);
+
+  return version;
+}
+
 static bool kburn_write_data(kburn_t *kburn, void *data, int length) {
   int rc = -1, size = 0;
 
@@ -441,6 +466,7 @@ bool kburn_erase(struct kburn_t *kburn, uint64_t offset, uint64_t size,
 }
 
 bool kburn_write_start(struct kburn_t *kburn, uint64_t offset, uint64_t size, uint64_t max, uint64_t part_flag) {
+  int cfg_size = sizeof(uint64_t) * 3;
   uint64_t cfg[4] = {offset, size, max, part_flag};
 
   if ((offset + size) > kburn->medium_info.capacity) {
@@ -467,7 +493,11 @@ bool kburn_write_start(struct kburn_t *kburn, uint64_t offset, uint64_t size, ui
     return false;
   }
 
-  if (false == kburn_send_cmd(kburn, KBURN_CMD_WRITE_LBA, &cfg[0], sizeof(cfg),
+  if(0x01 <= kburn->loader_version) {
+      cfg_size = sizeof(uint64_t) * 4;
+  }
+
+  if (false == kburn_send_cmd(kburn, KBURN_CMD_WRITE_LBA, &cfg[0], cfg_size,
                               NULL, NULL)) {
     spdlog::error("kburn write medium cfg failed");
     return false;
@@ -669,6 +699,8 @@ K230UBOOTBurner::K230UBOOTBurner(struct kburn_usb_node *node) : KBurner(node) {
 
   /* clear error status */
   kburn_nop(&kburn_);
+
+  kburn_.loader_version = kburn_probe_loader_version(&kburn_);
 
   kburn_.medium_info.timeout_ms = 1000;
 }
