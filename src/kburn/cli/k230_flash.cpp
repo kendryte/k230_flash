@@ -432,6 +432,8 @@ int main(int argc, char **argv) {
             goto _exit;
         }
 
+        do_sleep(100);
+
         printf("use device %04X:%04X, path %s, type %s.\n", dev.vid, dev.pid, dev.path, dev_type_str(dev.type));
     }
 

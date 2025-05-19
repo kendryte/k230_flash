@@ -119,9 +119,9 @@ static int kburn_probe_loader_version(kburn_t *kburn)
     /* wIndex        */ 0,
     /* Data          */ (uint8_t *)&version,
     /* wLength       */ sizeof(version),
-    /* timeout       */ kburn->medium_info.timeout_ms);
+    /* timeout       */ 1000);
 
-  if (rc != LIBUSB_SUCCESS) {
+  if (rc < LIBUSB_SUCCESS) {
     spdlog::error("usb issue control transfer failed, {}({})", rc, libusb_error_name(rc));
     return 0;
   }
@@ -697,10 +697,10 @@ K230UBOOTBurner::K230UBOOTBurner(struct kburn_usb_node *node) : KBurner(node) {
   }
   spdlog::debug("device ep_in {:#02x}, ep_out {:#02x}", kburn_.ep_in, kburn_.ep_out);
 
+  kburn_.loader_version = kburn_probe_loader_version(&kburn_);
+
   /* clear error status */
   kburn_nop(&kburn_);
-
-  kburn_.loader_version = kburn_probe_loader_version(&kburn_);
 
   kburn_.medium_info.timeout_ms = 1000;
 }
