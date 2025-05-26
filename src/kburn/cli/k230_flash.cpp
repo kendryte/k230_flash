@@ -422,6 +422,12 @@ int main(int argc, char **argv) {
 
         do_sleep(1000);
 
+#ifdef __ANDROID__
+        kburn_deinitialize();
+        do_sleep(1000);
+        kburn_initialize();
+#endif
+
         try {
             dev = poll_and_open_device(dev.path, true);
         } catch (const std::invalid_argument& e) {
