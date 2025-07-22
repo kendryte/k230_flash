@@ -40,7 +40,6 @@ bool K230BROMBurner::get_loader(const char **loader, size_t *size) {
   const char *loader_buffer = NULL;
 
   switch(_medium_type) {
-    case KBURN_MEDIUM_OTP:
     case KBURN_MEDIUM_EMMC:
     case KBURN_MEDIUM_SDCARD: {
       loader_buffer = k230_loader_mmc;
@@ -50,6 +49,7 @@ bool K230BROMBurner::get_loader(const char **loader, size_t *size) {
       loader_buffer = k230_loader_spi_nand;
       loader_size = k230_loader_spi_nand_size;
     } break;
+    case KBURN_MEDIUM_OTP:
     case KBURN_MEDIUM_SPI_NOR: {
       loader_buffer = k230_loader_spi_nor;
       loader_size = k230_loader_spi_nor_size;
