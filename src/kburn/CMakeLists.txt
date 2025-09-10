@@ -27,7 +27,7 @@ endfunction()
 
 set(K230_FLASH_VERSION_MAJOR 0)
 set(K230_FLASH_VERSION_MINOR 0)
-set(K230_FLASH_VERSION_PATCH 6)
+set(K230_FLASH_VERSION_PATCH 7)
 
 set(K230_FLASH_VERSION_STRING ${K230_FLASH_VERSION_MAJOR}.${K230_FLASH_VERSION_MINOR}.${K230_FLASH_VERSION_PATCH})
 message(STATUS "K230_FLASH_VERSION_STRING = ${K230_FLASH_VERSION_STRING}")
@@ -40,11 +40,20 @@ else()
 	set(IS_CI FALSE)
 endif()
 
-execute_process(
-    COMMAND git rev-parse HEAD
-    OUTPUT_VARIABLE GIT_COMMIT
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
+# Fetch the GIT_COMMIT environment variable
+set(GIT_COMMIT_ENV $ENV{GIT_COMMIT})
+
+# Fallback in case the environment variable is not set
+if(NOT GIT_COMMIT_ENV)
+    execute_process(
+        COMMAND git rev-parse HEAD
+        OUTPUT_VARIABLE GIT_COMMIT_ENV
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+endif()
+
+# Print the commit hash
+message(STATUS "GIT_COMMIT = ${GIT_COMMIT_ENV}")
 
 if(NOT DEFINED K230_FLASH_VERSION_STRING)
     set(K230_FLASH_VERSION_STRING "0.0.1")
@@ -62,6 +71,7 @@ file(GLOB K230_SRCS "burner_k230/*.cpp")
 
 set(SRCS
     kburn.cpp
+    kdimage.cpp
     ${K230_SRCS}
 )
 
@@ -81,6 +91,7 @@ target_compile_definitions(kburn PRIVATE
 set_target_properties(kburn PROPERTIES
     LANGUAGE CXX
     LINKER_LANGUAGE CXX
+    CXX_STANDARD 17
 	PREFIX lib
 )
 
@@ -127,9 +138,6 @@ add_subdirectory(3rd-party/libusb-cmake)
 
 add_dependencies(kburn usb-1.0)
 target_link_libraries(kburn PUBLIC usb-1.0)
-
-# Add k230_flash_cli project
-add_subdirectory(cli)
 
 if(LINUX AND IS_CIBUILDWHEEL)
 	message("Build by CIBUILDWHEEL")

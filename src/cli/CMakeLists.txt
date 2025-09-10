@@ -2,6 +2,14 @@ cmake_minimum_required(VERSION 3.4...3.18)
 
 option(BUILD_WITH_MINGW "Build in Dokcer MingW" OFF)
 
+if(NOT DEFINED CMAKE_BUILD_TYPE)
+	set(CMAKE_BUILD_TYPE "Release")
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "")
+	set(CMAKE_BUILD_TYPE "Release")
+endif()
+
 project(k230_flash)
 
 add_executable(${PROJECT_NAME} k230_flash.cpp)
@@ -56,7 +64,7 @@ if(WIN32 AND BUILD_WITH_MINGW)
     install(CODE "
         execute_process(
             COMMAND ${CMAKE_COMMAND} -E echo \"Running copy_dlls.sh\"
-            COMMAND bash \"/project/src/kburn/cli/cmake/copy_dlls.sh\"
+            COMMAND bash \"/project/src/cli/cmake/copy_dlls.sh\"
                     \"${OUTPUT_EXE_NAME}\" \"${TOOLCHAIN_ROOT}\" \"${CMAKE_INSTALL_PREFIX}\" \"${OBJDUMP_COMMAND}\"
             RESULT_VARIABLE RESULT
             COMMAND_ECHO STDOUT

@@ -209,8 +209,16 @@ KBurnUSBDeviceList *list_usb_device_with_vid_pid(uint16_t vid, uint16_t pid) {
     info.pid = desc.idProduct;
     usb_get_dev_path(dev, info.path);
 
-    if (LIBUSB_SUCCESS != (result = libusb_open(dev, &node.handle))) {
-      info.type = KBURN_USB_DEV_INVALID;
+    for(int retry = 0; retry < 3; retry++) {
+      if(LIBUSB_SUCCESS == (result = libusb_open(dev, &node.handle))) {
+        break;
+      }
+      do_sleep(500);
+    }
+
+    if(LIBUSB_SUCCESS != result) {
+      spdlog::warn("Open usb device failed, {}({})", result, libusb_strerror(result));
+      continue;
     } else {
       memcpy(&node.info, &info, sizeof(info));
 

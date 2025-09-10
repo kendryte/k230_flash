@@ -1,6 +1,7 @@
 #pragma once
 
 #include "kburn.h"
+#include <fstream>
 
 namespace Kendryte_Burning_Tool {
 
@@ -32,6 +33,10 @@ public:
   bool get_loader(const char **loader, size_t *size);
 
   bool write(const void *data, size_t size, uint64_t address = 0x80360000);
+  bool write_stream(std::ifstream& file_stream, size_t size, uint64_t address, uint64_t max, uint64_t flag) {
+    spdlog::error("brom burner, not support write stream");
+    return false;
+  }
 
 private:
   bool k230_brom_set_data_addr(uint64_t address = 0x80360000);
@@ -55,9 +60,13 @@ struct kburn_t {
 
   char error_msg[128];
 
+  int loader_version;
+
   int ep_in, ep_out;
+  uint16_t ep_out_mps;
   uint64_t capacity;
-  uint64_t dl_total, dl_size, dl_offset;
+
+  std::vector<uint8_t> rd_buffer;
 };
 
 class KBURN_API K230UBOOTBurner : public KBurner {
@@ -81,13 +90,23 @@ public:
     return static_cast<uint8_t>(kburn_.medium_info.valid);
   }
 
-  bool write(const void *data, size_t size, uint64_t address);
+  bool write(const void *data, size_t size, uint64_t address) {
+    spdlog::error("uboot burner, not support write data");
+    return false;
+  }
+
+  bool write_stream(std::ifstream& file_stream, size_t size, uint64_t address, uint64_t max, uint64_t flag);
+
+  bool read(void *data, size_t size, uint64_t address);
+
+  bool erase(uint64_t address, size_t size);
 
 private:
   bool probe_succ = false;
-  uint64_t chunk_size = 512;
+  uint64_t out_chunk_size = 512;
+  uint64_t in_chunk_size = 512;
 
-  std::vector<uint8_t> write_buffer;
+  std::vector<uint8_t> wr_buffer;
 
   struct kburn_t kburn_;
 };
