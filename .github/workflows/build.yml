@@ -42,7 +42,7 @@ jobs:
     - name: Build K230 Cli for Windows
       run: |
         rm -rf ${{ github.workspace }}/build && mkdir -p ${{ github.workspace }}/build
-        docker run --name llvm_mingw -v "${PWD}:/project:ro" -e GIT_COMMIT=${{ env.REVISION }} mstorsjo/llvm-mingw /bin/bash -c 'cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/build/dist -DBUILD_WITH_MINGW=ON -DCMAKE_TOOLCHAIN_FILE=/project/src/kburn/cli/cmake/mingw-toolchain.cmake -S /project/src/kburn -B /build; cmake --build /build --config Release; cmake --install /build --prefix /build/dist'
+        docker run --name llvm_mingw -v "${PWD}:/project:ro" -e GIT_COMMIT=${{ env.REVISION }} mstorsjo/llvm-mingw /bin/bash -c 'cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/build/dist -DBUILD_WITH_MINGW=ON -DCMAKE_TOOLCHAIN_FILE=/project/src/cli/cmake/mingw-toolchain.cmake -S /project/src/kburn -B /build; cmake --build /build --config Release; cmake --install /build --prefix /build/dist'
         docker cp llvm_mingw:/build/dist ${{ github.workspace }}/dist
         docker rm llvm_mingw
         ls -alh ${{ github.workspace }}/dist
