@@ -139,9 +139,6 @@ add_subdirectory(3rd-party/libusb-cmake)
 add_dependencies(kburn usb-1.0)
 target_link_libraries(kburn PUBLIC usb-1.0)
 
-# Add k230_flash_cli project
-add_subdirectory(cli)
-
 if(LINUX AND IS_CIBUILDWHEEL)
 	message("Build by CIBUILDWHEEL")
 
