@@ -702,7 +702,7 @@ K230UBOOTBurner::K230UBOOTBurner(struct kburn_usb_node *node) : KBurner(node) {
   /* clear error status */
   kburn_nop(&kburn_);
 
-  kburn_.medium_info.timeout_ms = 1000;
+  kburn_.medium_info.timeout_ms = 10000; // set a longer timeout for probe medium info
 }
 
 bool K230UBOOTBurner::probe(void) {
