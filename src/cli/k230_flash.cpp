@@ -42,6 +42,10 @@ uint64_t round_up(uint64_t value, uint64_t multiple) {
     return (value + multiple - 1) / multiple * multiple;
 }
 
+uint64_t round_down(uint64_t value, uint64_t multiple) {
+    return value - (value % multiple);
+}
+
 const char *dev_type_str(enum kburn_usb_dev_type type) {
     const char *type_str[] = {"INVALID", "BROM", "UBOOT"};
 
@@ -555,6 +559,35 @@ int main(int argc, char **argv) {
                 size_t file_size = static_cast<size_t>(file.tellg());
                 file.seekg(0, std::ios::beg);
 
+                uint64_t medium_erase_size = medium_info->erase_size;
+                if (medium_erase_size == 0) {
+                    printf("Error: Unable to get medium erase size.\n");
+                    delete uboot_burner;
+                    goto _exit;
+                }
+
+                if (item.partOffset % medium_erase_size != 0) {
+                    printf("Error: Part %s offset 0x%08lX is not aligned to erase size %lu.\n", item.partName.c_str(), item.partOffset, medium_erase_size);
+                    delete uboot_burner;
+                    goto _exit;
+                }
+
+                if (item.partEraseSize > 0) {
+                    uint64_t erase_start = round_up(item.partOffset + static_cast<uint64_t>(file_size), medium_erase_size);
+                    uint64_t erase_end = round_down(item.partOffset + static_cast<uint64_t>(item.partEraseSize), medium_erase_size);
+                    uint64_t erase_range = erase_end > erase_start ? erase_end - erase_start : 0;
+
+                    if (erase_range > 0) {
+                        printf("Erase %s remain from 0x%08lX to 0x%08lX, Size: %lu.\n", item.partName.c_str(), erase_start, erase_end, erase_range);
+
+                        if (!uboot_burner->erase(erase_start, erase_range)) {
+                            printf("Erase %s remain from 0x%08lX to 0x%08lX failed.\n", item.partName.c_str(), erase_start, erase_end);
+                            delete uboot_burner;
+                            goto _exit;
+                        }
+                    }
+                }
+
                 printf("Write %s to 0x%08lX, Size: %zd.\n", item.fileName.c_str(), item.partOffset, file_size);
 
                 if (false == uboot_burner->write_stream(file, file_size, item.partOffset, item.partSize, item.partFlag)) {
@@ -563,45 +596,6 @@ int main(int argc, char **argv) {
                     goto _exit;
                 }
                 file.close();
-
-                // Erase remaining space if partEraseSize is specified
-                if (item.partEraseSize > 0) {
-                    uint64_t _medium_erase_size = medium_info->erase_size;
-                    if (_medium_erase_size == 0) {
-                        printf("Error: Unable to get medium erase size.\n");
-                        goto _exit;
-                    }
-
-                    // Calculate the remaining space to erase
-                    uint64_t _erase_start = item.partOffset + file_size;
-                    uint64_t _erase_end = item.partOffset + item.partEraseSize;
-
-                    // Align erase start to medium erase size (round up)
-                    if (_erase_start % _medium_erase_size != 0) {
-                        _erase_start = ((_erase_start + _medium_erase_size - 1) / _medium_erase_size) * _medium_erase_size;
-                    }
-
-                    // Align erase end to medium erase size (round down)
-                    if (_erase_end % _medium_erase_size != 0) {
-                        _erase_end = (_erase_end / _medium_erase_size) * _medium_erase_size;
-                    }
-
-                    // Calculate the erase size
-                    uint64_t _erase_size = (_erase_end > _erase_start) ? (_erase_end - _erase_start) : 0;
-
-                    if (_erase_size > 0) {
-                        printf("Erasing remaining space from 0x%08lX to 0x%08lX, Size: %lu.\n", _erase_start, _erase_end, _erase_size);
-
-                        if (uboot_burner->erase(_erase_start, _erase_size)) {
-                            printf("Erase successful.\n");
-                        } else {
-                            printf("Erase failed.\n");
-                            goto _exit;
-                        }
-                    } else {
-                        printf("No remaining space to erase.\n");
-                    }
-                }
             }
         }
 
