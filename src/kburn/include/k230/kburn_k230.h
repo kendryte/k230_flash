@@ -52,6 +52,8 @@ struct kburn_medium_info {
   uint64_t type : 7;
   uint64_t valid : 1;
 };
+static_assert(sizeof(kburn_medium_info) == 32,
+	      "KBURN medium-info ABI changed");
 
 struct kburn_t {
   struct kburn_usb_node *node;
@@ -65,6 +67,9 @@ struct kburn_t {
   int ep_in, ep_out;
   uint16_t ep_out_mps;
   uint64_t capacity;
+	uint64_t out_chunk_size;
+	uint64_t dl_total;
+	uint64_t dl_sent;
 
   std::vector<uint8_t> rd_buffer;
 };
@@ -103,6 +108,7 @@ public:
 
 private:
   bool probe_succ = false;
+  bool endpoints_valid = false;
   uint64_t out_chunk_size = 512;
   uint64_t in_chunk_size = 512;
 

@@ -20,58 +20,24 @@ target_link_libraries(${PROJECT_NAME} PRIVATE kburn)
 set_target_properties(${PROJECT_NAME} PROPERTIES
     CXX_STANDARD 17
     OUTPUT_NAME k230_flash_cli
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
 add_subdirectory(CLI11)
 target_link_libraries(${PROJECT_NAME} PRIVATE CLI11::CLI11)
 
 if(APPLE)
-    # macOS-specific rpath settings
-    target_link_options(${PROJECT_NAME} PRIVATE
-        "-Wl,-rpath,@loader_path"
-        "-Wl,-rpath,@loader_path/../lib"
-        "-Wl,-rpath,@executable_path"
-    )
-elseif(UNIX AND NOT APPLE)
-    # Linux-specific rpath settings
-    target_link_options(${PROJECT_NAME} PRIVATE
-        "-Wl,-rpath,$ORIGIN"
-        "-Wl,-rpath,$ORIGIN/../lib"
-    )
-elseif(WIN32)
-
-endif()
-
-# Set RPATH for installed binaries (common for macOS and Linux)
-if(NOT WIN32)
     set_target_properties(${PROJECT_NAME} PROPERTIES
+        BUILD_RPATH "${CMAKE_BINARY_DIR}/bin"
+        INSTALL_RPATH "@loader_path"
+    )
+elseif(UNIX)
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        BUILD_RPATH "${CMAKE_BINARY_DIR}/bin"
         INSTALL_RPATH "$ORIGIN"
-        BUILD_WITH_INSTALL_RPATH TRUE
     )
 endif()
 
-install(TARGETS ${PROJECT_NAME})
-
-get_target_property(OUTPUT_EXE_NAME ${PROJECT_NAME} OUTPUT_NAME)
-
-message(STATUS "CMAKE_CURRENT_LIST_DIR ${CMAKE_CURRENT_LIST_DIR}")
-message(STATUS "CMAKE_CURRENT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}")
-message(STATUS "CMAKE_SOURCE_DIR ${CMAKE_SOURCE_DIR}")
-
-# this is just for ci build, so hard code the script path
-
-if(WIN32 AND BUILD_WITH_MINGW)
-    install(CODE "
-        execute_process(
-            COMMAND ${CMAKE_COMMAND} -E echo \"Running copy_dlls.sh\"
-            COMMAND bash \"/project/src/cli/cmake/copy_dlls.sh\"
-                    \"${OUTPUT_EXE_NAME}\" \"${TOOLCHAIN_ROOT}\" \"${CMAKE_INSTALL_PREFIX}\" \"${OBJDUMP_COMMAND}\"
-            RESULT_VARIABLE RESULT
-            COMMAND_ECHO STDOUT
-            COMMAND_ERROR_IS_FATAL ANY
-        )
-        if(NOT RESULT EQUAL 0)
-            message(FATAL_ERROR \"Failed to execute copy_dlls.sh.\")
-        endif()
-    ")
-endif()
+install(TARGETS ${PROJECT_NAME}
+    RUNTIME DESTINATION bin
+)
