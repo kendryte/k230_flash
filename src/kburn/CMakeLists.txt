@@ -46,14 +46,16 @@ set(GIT_COMMIT_ENV $ENV{GIT_COMMIT})
 # Fallback in case the environment variable is not set
 if(NOT GIT_COMMIT_ENV)
     execute_process(
-        COMMAND git rev-parse HEAD
+        COMMAND git -C "${CMAKE_SOURCE_DIR}" rev-parse HEAD
         OUTPUT_VARIABLE GIT_COMMIT_ENV
         OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
     )
 endif()
 
 # Print the commit hash
 message(STATUS "GIT_COMMIT = ${GIT_COMMIT_ENV}")
+set(GIT_COMMIT "${GIT_COMMIT_ENV}")
 
 if(NOT DEFINED K230_FLASH_VERSION_STRING)
     set(K230_FLASH_VERSION_STRING "0.0.1")
@@ -93,38 +95,25 @@ set_target_properties(kburn PROPERTIES
     LINKER_LANGUAGE CXX
     CXX_STANDARD 17
 	PREFIX lib
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
 if(APPLE)
-    # macOS-specific rpath settings
-    target_link_options(kburn PRIVATE
-        "-Wl,-rpath,@loader_path"
-        "-Wl,-rpath,@loader_path/../lib"
-        "-Wl,-rpath,@executable_path"
-    )
-elseif(UNIX AND NOT APPLE)
-    # Linux-specific rpath settings
-    target_link_options(kburn PRIVATE
-        "-Wl,-rpath,$ORIGIN"
-    )
-elseif(WIN32)
-
-endif()
-
-# Set RPATH for installed binaries (common for macOS and Linux)
-if(NOT WIN32)
     set_target_properties(kburn PROPERTIES
+        BUILD_RPATH "${CMAKE_BINARY_DIR}/bin"
+        INSTALL_RPATH "@loader_path"
+        BUILD_WITH_INSTALL_RPATH FALSE
+    )
+elseif(UNIX)
+    set_target_properties(kburn PROPERTIES
+        BUILD_RPATH "${CMAKE_BINARY_DIR}/bin"
         INSTALL_RPATH "$ORIGIN"
-        BUILD_WITH_INSTALL_RPATH TRUE
+        BUILD_WITH_INSTALL_RPATH FALSE
     )
 endif()
 
 ####################################### spdlog ################################
 set(SPDLOG_BUILD_PIC ON)
-
-if(APPLE)
-	set(SPDLOG_FMT_EXTERNAL_HO ON)
-endif()
 
 add_subdirectory(3rd-party/spdlog)
 
@@ -136,14 +125,27 @@ set(BUILD_SHARED_LIBS ON)
 set(LIBUSB_INSTALL_TARGETS OFF)
 add_subdirectory(3rd-party/libusb-cmake)
 
+# Keep the runtime bundle flat on every desktop platform, matching the CLI
+# executable and kburn library output directories.
+set_target_properties(usb-1.0 PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
 add_dependencies(kburn usb-1.0)
 target_link_libraries(kburn PUBLIC usb-1.0)
 
-if(LINUX AND IS_CIBUILDWHEEL)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IS_CIBUILDWHEEL)
 	message("Build by CIBUILDWHEEL")
 
 	install(TARGETS kburn usb-1.0
-		DESTINATION /lib/kburn)
+		RUNTIME DESTINATION bin
+		LIBRARY DESTINATION bin
+		ARCHIVE DESTINATION bin)
 else()
-	install(TARGETS kburn usb-1.0)
+	install(TARGETS kburn usb-1.0
+		RUNTIME DESTINATION bin
+		LIBRARY DESTINATION bin
+		ARCHIVE DESTINATION bin
+	)
 endif()
