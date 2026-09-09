@@ -35,6 +35,8 @@ Optional variables:
 
 - `MACOS_KEYCHAIN`: absolute path to a dedicated keychain. Leave empty to use
   the account's normal keychain search list.
+- `MACOS_KEYCHAIN_PASSWORD`: password used by CI to unlock the signing
+  keychain. Store it as a secret in the `macos-signing` environment.
 - `MACOS_NOTARY_PROFILE`: the local `notarytool` keychain profile name. Leave
   empty to sign without notarization.
 

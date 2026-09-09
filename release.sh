@@ -63,6 +63,16 @@ case "$TARGET_OS" in
         ;;
 esac
 
+# GitHub environment secrets can contain a trailing newline when pasted from
+# a file. These values are passed to CMake and macOS tools, where that newline
+# becomes part of the identity, keychain path, or notarization profile.
+if [[ "$TARGET_OS" == "macos" ]]; then
+    MACOS_SIGN_IDENTITY=$(printf '%s' "${MACOS_SIGN_IDENTITY:-}" | tr -d '\r\n')
+    MACOS_KEYCHAIN=$(printf '%s' "${MACOS_KEYCHAIN:-}" | tr -d '\r\n')
+    MACOS_NOTARY_PROFILE=$(printf '%s' "${MACOS_NOTARY_PROFILE:-}" | tr -d '\r\n')
+    export MACOS_SIGN_IDENTITY MACOS_KEYCHAIN MACOS_NOTARY_PROFILE
+fi
+
 for command_name in cmake; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
         echo "Error: required command not found: $command_name" >&2
@@ -163,16 +173,17 @@ if [[ "$TARGET_OS" == "macos" ]]; then
         echo "Error: required command not found: security" >&2
         exit 1
     fi
-    IDENTITY_KEYCHAIN_ARGS=()
-    if [[ -n "${MACOS_KEYCHAIN:-}" ]]; then
-        IDENTITY_KEYCHAIN_ARGS+=("$MACOS_KEYCHAIN")
-    fi
-    if [[ -n "$SIGN_IDENTITY" ]] &&
-       ! security find-identity -v -p codesigning "${IDENTITY_KEYCHAIN_ARGS[@]}" |
-           grep -F -- "$SIGN_IDENTITY" >/dev/null; then
-        echo "Error: signing identity was not found: $SIGN_IDENTITY" >&2
-        security find-identity -v -p codesigning "${IDENTITY_KEYCHAIN_ARGS[@]}" >&2
-        exit 1
+    if [[ -n "$SIGN_IDENTITY" ]]; then
+        if [[ -n "${MACOS_KEYCHAIN:-}" ]]; then
+            identities=$(security find-identity -v -p codesigning "$MACOS_KEYCHAIN")
+        else
+            identities=$(security find-identity -v -p codesigning)
+        fi
+        if ! grep -F -- "$SIGN_IDENTITY" <<<"$identities" >/dev/null; then
+            echo "Error: signing identity was not found: $SIGN_IDENTITY" >&2
+            printf '%s\n' "$identities" >&2
+            exit 1
+        fi
     fi
 
     CMAKE_ARGS+=(

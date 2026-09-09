@@ -97,15 +97,26 @@ jobs:
         env:
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
           MACOS_KEYCHAIN: ${{ secrets.MACOS_KEYCHAIN }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
         run: |
           set -euo pipefail
           : "${MACOS_SIGN_IDENTITY:?Set MACOS_SIGN_IDENTITY in the macos-signing environment}"
-          keychain_args=()
+          : "${MACOS_KEYCHAIN_PASSWORD:?Set MACOS_KEYCHAIN_PASSWORD in the macos-signing environment}"
+          MACOS_SIGN_IDENTITY="${MACOS_SIGN_IDENTITY//$'\r'/}"
+          MACOS_SIGN_IDENTITY="${MACOS_SIGN_IDENTITY//$'\n'/}"
+          MACOS_KEYCHAIN="${MACOS_KEYCHAIN//$'\r'/}"
+          MACOS_KEYCHAIN="${MACOS_KEYCHAIN//$'\n'/}"
           if [[ -n "${MACOS_KEYCHAIN:-}" ]]; then
-            keychain_args+=("$MACOS_KEYCHAIN")
+            signing_keychain="$MACOS_KEYCHAIN"
+          else
+            signing_keychain=$(security default-keychain -d user | sed 's/^"//; s/"$//')
           fi
-          if ! security find-identity -v -p codesigning "${keychain_args[@]}" | \
-              grep -F -- "$MACOS_SIGN_IDENTITY" >/dev/null; then
+          security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$signing_keychain" >/dev/null
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$MACOS_KEYCHAIN_PASSWORD" "$signing_keychain" >/dev/null
+          identities=$(security find-identity -v -p codesigning "$signing_keychain" 2>/dev/null)
+          if ! grep -F -- "$MACOS_SIGN_IDENTITY" <<<"$identities" >/dev/null; then
             echo "Installed signing identity was not found: $MACOS_SIGN_IDENTITY" >&2
             exit 1
           fi
@@ -137,6 +148,19 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: release
+          merge-multiple: true
+
+      - name: Verify release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          find release -maxdepth 1 -type f -print
+          test -n "$(find release -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print -quit)"
+          test -n "$(find release -maxdepth 1 -type f -name '*.sha256' -print -quit)"
+          if find release -mindepth 2 -type f -print -quit | grep -q .; then
+            echo "Unexpected nested files in release download" >&2
+            exit 1
+          fi
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
@@ -144,6 +168,6 @@ jobs:
           generate_release_notes: true
           tag_name: ${{ github.ref_name }}
           files: |
-            release/**/*.tar.gz
-            release/**/*.zip
-            release/**/*.sha256
+            release/*.tar.gz
+            release/*.zip
+            release/*.sha256
