@@ -14,8 +14,16 @@ permissions:
 
 jobs:
   build-linux:
-    name: Linux x86_64
-    runs-on: ubuntu-22.04
+    name: Linux ${{ matrix.arch }} (Ubuntu 22.04 baseline)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: x86_64
+          - runner: ubuntu-22.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,16 +40,28 @@ jobs:
         env:
           K230_FLASH_BUILD_DIR: ${{ github.workspace }}/build/release/linux
           K230_FLASH_DIST_DIR: ${{ github.workspace }}/dist
+          K230_FLASH_TARGET_ARCH: ${{ matrix.arch }}
         run: ./release.sh
+
+      - name: Check native CLI startup
+        run: build/release/linux/bin/k230_flash_cli --help
 
       - uses: actions/upload-artifact@v4
         with:
-          name: k230-flash-linux
+          name: k230-flash-linux-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
 
   build-windows:
-    name: Windows x86_64
+    name: Windows ${{ matrix.arch }} (LLVM-MinGW)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64
+          - arch: arm64
+            target: aarch64
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -53,16 +73,20 @@ jobs:
         run: echo "K230_FLASH_REVISION=$(git describe --long --tags --always)" >> "$GITHUB_ENV"
 
       - name: Build and package with LLVM-MinGW
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+          LLVM_MINGW_TARGET: ${{ matrix.target }}
         run: |
           mkdir -p "${{ github.workspace }}/build/windows" "${{ github.workspace }}/dist"
           docker run --rm \
             -e K230_FLASH_REVISION="${K230_FLASH_REVISION}" \
+            -e LLVM_MINGW_TARGET -e TARGET_ARCH \
             -v "${{ github.workspace }}:/project:ro" \
             -v "${{ github.workspace }}/build/windows:/build" \
             -v "${{ github.workspace }}/dist:/output" \
             mstorsjo/llvm-mingw /bin/bash -euc '
               K230_FLASH_TARGET_OS=windows \
-              K230_FLASH_TARGET_ARCH=x86_64 \
+              K230_FLASH_TARGET_ARCH="$TARGET_ARCH" \
               K230_FLASH_BUILD_DIR=/build \
               K230_FLASH_DIST_DIR=/output \
               CMAKE_TOOLCHAIN_FILE=/project/src/cli/cmake/mingw-toolchain.cmake \
@@ -73,15 +97,28 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: k230-flash-windows
+          name: k230-flash-windows-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
 
   build-macos:
-    name: macOS ARM64 validation/release
-    runs-on: [self-hosted, macOS, ARM64, shenzhen_mac]
-    environment:
-      name: ${{ startsWith(github.ref, 'refs/tags/') && 'macos-signing' || 'macos-validation' }}
+    name: Build macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x86_64
+          - runner: [self-hosted, macOS, ARM64, shenzhen_mac]
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    concurrency:
+      group: ${{ matrix.arch == 'arm64' && 'k230-flash-macos-runner' || format('k230-flash-intel-{0}', github.ref) }}
+      cancel-in-progress: false
+      queue: max
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
@@ -89,78 +126,120 @@ jobs:
           persist-credentials: false
 
       - name: Install dependencies
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
         run: brew install ninja
 
-      - name: Verify installed signing identity
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+      - name: Get revision
+        run: |
+          echo "K230_FLASH_REVISION=${GITHUB_REF_NAME//\//-}-${GITHUB_SHA:0:12}" >> "$GITHUB_ENV"
+
+      - name: Build unsigned CLI package
+        env:
+          K230_FLASH_TARGET_OS: macos
+          K230_FLASH_TARGET_ARCH: ${{ matrix.arch }}-unsigned
+          K230_FLASH_BUILD_DIR: ${{ github.workspace }}/build/release/macos
+          K230_FLASH_DIST_DIR: ${{ github.workspace }}/dist
+          MACOS_ARCHITECTURES: ${{ matrix.arch }}
+          MACOS_DEPLOYMENT_TARGET: "13.0"
+          MACOS_ALLOW_UNSIGNED: "1"
+          MACOS_SIGN_IDENTITY: ""
+          MACOS_KEYCHAIN: ""
+          MACOS_NOTARY_PROFILE: ""
+        run: ./release.sh
+
+      - name: Check native architecture and CLI startup
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          lipo build/release/macos/bin/k230_flash_cli -verify_arch "$TARGET_ARCH"
+          build/release/macos/bin/k230_flash_cli --help
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-unsigned-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+
+  sign-macos:
+    name: Sign and notarize macOS packages
+    needs: build-macos
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: [self-hosted, macOS, ARM64, shenzhen_mac]
+    environment: macos-signing
+    concurrency:
+      group: k230-flash-macos-runner
+      cancel-in-progress: false
+      queue: max
+    defaults:
+      run:
         shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macos-unsigned-*
+          path: macos-input
+
+      - name: Sign and notarize both architectures
         env:
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
           MACOS_KEYCHAIN: ${{ secrets.MACOS_KEYCHAIN }}
           MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+          MACOS_NOTARY_PROFILE: ${{ secrets.MACOS_NOTARY_PROFILE }}
         run: |
           set -euo pipefail
-          : "${MACOS_SIGN_IDENTITY:?Set MACOS_SIGN_IDENTITY in the macos-signing environment}"
-          : "${MACOS_KEYCHAIN_PASSWORD:?Set MACOS_KEYCHAIN_PASSWORD in the macos-signing environment}"
-          MACOS_SIGN_IDENTITY="${MACOS_SIGN_IDENTITY//$'\r'/}"
-          MACOS_SIGN_IDENTITY="${MACOS_SIGN_IDENTITY//$'\n'/}"
-          MACOS_KEYCHAIN="${MACOS_KEYCHAIN//$'\r'/}"
-          MACOS_KEYCHAIN="${MACOS_KEYCHAIN//$'\n'/}"
-          if [[ -n "${MACOS_KEYCHAIN:-}" ]]; then
-            signing_keychain="$MACOS_KEYCHAIN"
-          else
-            signing_keychain=$(security default-keychain -d user | sed 's/^"//; s/"$//')
-          fi
-          security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$signing_keychain" >/dev/null
-          security set-key-partition-list \
-            -S apple-tool:,apple:,codesign: \
-            -s -k "$MACOS_KEYCHAIN_PASSWORD" "$signing_keychain" >/dev/null
-          identities=$(security find-identity -v -p codesigning "$signing_keychain" 2>/dev/null)
-          if ! grep -F -- "$MACOS_SIGN_IDENTITY" <<<"$identities" >/dev/null; then
-            echo "Installed signing identity was not found: $MACOS_SIGN_IDENTITY" >&2
-            exit 1
-          fi
-
-      - name: Build and sign release artifact
-        env:
-          K230_FLASH_BUILD_DIR: ${{ github.workspace }}/build/release/macos
-          K230_FLASH_DIST_DIR: ${{ github.workspace }}/dist
-          MACOS_ARCHITECTURES: arm64
-          MACOS_SIGN_IDENTITY: ${{ startsWith(github.ref, 'refs/tags/') && secrets.MACOS_SIGN_IDENTITY || '' }}
-          MACOS_KEYCHAIN: ${{ startsWith(github.ref, 'refs/tags/') && secrets.MACOS_KEYCHAIN || '' }}
-          MACOS_NOTARY_PROFILE: ${{ startsWith(github.ref, 'refs/tags/') && secrets.MACOS_NOTARY_PROFILE || '' }}
-          MACOS_ALLOW_UNSIGNED: ${{ startsWith(github.ref, 'refs/tags/') && '' || '1' }}
-        run: ./release.sh
+          source .github/scripts/prepare-macos-signing.sh
+          work=$(mktemp -d "$RUNNER_TEMP/k230-flash-signing.XXXXXX")
+          echo "MACOS_SIGNING_WORK=$work" >> "$GITHUB_ENV"
+          echo "MACOS_RELEASE_DIR=$work/output" >> "$GITHUB_ENV"
+          revision="${GITHUB_REF_NAME//\//-}-${GITHUB_SHA:0:12}"
+          for arch in x86_64 arm64; do
+            bash .github/scripts/sign-macos-package.sh \
+              "$arch" "$revision" "$PWD/macos-input/macos-unsigned-$arch" "$work"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
-          name: k230-flash-macos-arm64
-          path: dist/*
+          name: k230-flash-macos-signed
+          path: |
+            ${{ env.MACOS_RELEASE_DIR }}/*.zip
+            ${{ env.MACOS_RELEASE_DIR }}/*.sha256
           if-no-files-found: error
+          compression-level: 0
+
+      - name: Clean signing staging directory
+        if: always()
+        run: |
+          if [[ -n "${MACOS_SIGNING_WORK:-}" ]]; then
+            cmake -E remove_directory "$MACOS_SIGNING_WORK"
+          fi
 
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build-linux, build-windows, build-macos]
+    needs: [build-linux, build-windows, sign-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@v4
         with:
+          pattern: k230-flash-*
           path: release
           merge-multiple: true
 
       - name: Verify release files
         shell: bash
-        run: |
-          set -euo pipefail
-          find release -maxdepth 1 -type f -print
-          test -n "$(find release -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print -quit)"
-          test -n "$(find release -maxdepth 1 -type f -name '*.sha256' -print -quit)"
-          if find release -mindepth 2 -type f -print -quit | grep -q .; then
-            echo "Unexpected nested files in release download" >&2
-            exit 1
-          fi
+        run: bash .github/scripts/verify-release.sh release
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2

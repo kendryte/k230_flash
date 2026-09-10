@@ -39,37 +39,38 @@ if(BUILD_WITH_MINGW)
         find_program(OBJDUMP_EXECUTABLE NAMES "${OBJDUMP_COMMAND}" REQUIRED)
     endif()
 
-    execute_process(
-        COMMAND "${OBJDUMP_EXECUTABLE}" -p "${CLI_PATH}"
-        OUTPUT_VARIABLE pe_headers
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE objdump_result
-    )
-    if(NOT objdump_result STREQUAL "0")
-        message(FATAL_ERROR "Failed to inspect ${CLI_PATH} with objdump")
-    endif()
-    string(TOLOWER "${pe_headers}" pe_headers_lower)
-
+    file(GLOB inspect_files "${BIN_DIR}/*.dll")
+    list(APPEND inspect_files "${CLI_PATH}")
     get_filename_component(toolchain_parent "${TOOLCHAIN_ROOT}" DIRECTORY)
-    foreach(runtime_dll IN ITEMS libunwind.dll libc++.dll)
-        string(FIND "${pe_headers_lower}" "${runtime_dll}" runtime_dependency_position)
-        if(runtime_dependency_position EQUAL -1)
-            continue()
-        endif()
-
-        unset(runtime_dll_path CACHE)
-        find_file(runtime_dll_path
-            NAMES "${runtime_dll}"
-            PATHS "${TOOLCHAIN_ROOT}" "${TOOLCHAIN_ROOT}/bin" "${toolchain_parent}/bin"
-            NO_DEFAULT_PATH
+    while(inspect_files)
+        list(POP_FRONT inspect_files binary)
+        execute_process(
+            COMMAND "${OBJDUMP_EXECUTABLE}" -p "${binary}"
+            OUTPUT_VARIABLE pe_headers
+            RESULT_VARIABLE objdump_result
         )
-        if(NOT runtime_dll_path)
-            message(FATAL_ERROR "Required toolchain runtime not found: ${runtime_dll}")
+        if(NOT objdump_result STREQUAL "0")
+            message(FATAL_ERROR "Failed to inspect ${binary} with objdump")
         endif()
-
-        message(STATUS "Installing ${runtime_dll_path}")
-        file(INSTALL "${runtime_dll_path}" DESTINATION "${BIN_DIR}")
-    endforeach()
+        string(TOLOWER "${pe_headers}" pe_headers_lower)
+        foreach(runtime_dll IN ITEMS libunwind.dll libc++.dll)
+            string(FIND "${pe_headers_lower}" "${runtime_dll}" runtime_dependency_position)
+            if(runtime_dependency_position EQUAL -1 OR EXISTS "${BIN_DIR}/${runtime_dll}")
+                continue()
+            endif()
+            unset(runtime_dll_path CACHE)
+            find_file(runtime_dll_path
+                NAMES "${runtime_dll}"
+                PATHS "${TOOLCHAIN_ROOT}" "${TOOLCHAIN_ROOT}/bin" "${toolchain_parent}/bin"
+                NO_DEFAULT_PATH
+            )
+            if(NOT runtime_dll_path)
+                message(FATAL_ERROR "Required toolchain runtime not found: ${runtime_dll}")
+            endif()
+            file(INSTALL "${runtime_dll_path}" DESTINATION "${BIN_DIR}")
+            list(APPEND inspect_files "${BIN_DIR}/${runtime_dll}")
+        endforeach()
+    endwhile()
 endif()
 
 file(REMOVE_RECURSE "${INSTALL_PREFIX}/lib")

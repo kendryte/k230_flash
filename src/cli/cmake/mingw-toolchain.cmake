@@ -1,13 +1,21 @@
 # mingw-toolchain.cmake
 set(CMAKE_SYSTEM_NAME Windows)
 
-set(CMAKE_C_COMPILER x86_64-w64-mingw32-gcc)
-set(CMAKE_CXX_COMPILER x86_64-w64-mingw32-g++)
-set(CMAKE_RC_COMPILER x86_64-w64-mingw32-windres)
-set(OBJDUMP_COMMAND x86_64-w64-mingw32-objdump)
+set(LLVM_MINGW_TARGET "$ENV{LLVM_MINGW_TARGET}")
+if(NOT LLVM_MINGW_TARGET)
+    set(LLVM_MINGW_TARGET x86_64)
+endif()
+if(NOT LLVM_MINGW_TARGET MATCHES "^(x86_64|aarch64)$")
+    message(FATAL_ERROR "LLVM_MINGW_TARGET must be x86_64 or aarch64")
+endif()
+set(CMAKE_SYSTEM_PROCESSOR "${LLVM_MINGW_TARGET}")
+set(CMAKE_C_COMPILER ${LLVM_MINGW_TARGET}-w64-mingw32-gcc)
+set(CMAKE_CXX_COMPILER ${LLVM_MINGW_TARGET}-w64-mingw32-g++)
+set(CMAKE_RC_COMPILER ${LLVM_MINGW_TARGET}-w64-mingw32-windres)
+set(OBJDUMP_COMMAND ${LLVM_MINGW_TARGET}-w64-mingw32-objdump)
 
 set(CMAKE_FIND_ROOT_PATH /opt/llvm-mingw)
-set(TOOLCHAIN_ROOT /opt/llvm-mingw/x86_64-w64-mingw32/bin)
+set(TOOLCHAIN_ROOT /opt/llvm-mingw/${LLVM_MINGW_TARGET}-w64-mingw32/bin)
 
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)

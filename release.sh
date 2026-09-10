@@ -21,7 +21,7 @@ Common environment variables:
 macOS environment variables:
   MACOS_SIGN_IDENTITY      required Developer ID Application identity
   MACOS_ARCHITECTURES      CMake architecture list (default: current machine)
-  MACOS_DEPLOYMENT_TARGET  optional deployment target
+  MACOS_DEPLOYMENT_TARGET  deployment target (default: 13.0)
   MACOS_NOTARY_PROFILE     optional notarytool keychain profile
   MACOS_KEYCHAIN           optional dedicated signing/notarization keychain
   MACOS_ALLOW_UNSIGNED=1   CI validation only; name the artifact unsigned
@@ -46,7 +46,7 @@ detect_host_os() {
     case "$uname_value" in
         darwin) echo macos ;;
         linux) echo linux ;;
-        *mingw*|*msys*|*cygwin*) echo windows ;;
+        *mingw*|*msys*|*cygwin*|*clang*|*ucrt*) echo windows ;;
         *)
             echo "Error: unsupported host OS: $uname_value" >&2
             return 1
@@ -67,6 +67,7 @@ esac
 # a file. These values are passed to CMake and macOS tools, where that newline
 # becomes part of the identity, keychain path, or notarization profile.
 if [[ "$TARGET_OS" == "macos" ]]; then
+    MACOS_DEPLOYMENT_TARGET=${MACOS_DEPLOYMENT_TARGET:-13.0}
     MACOS_SIGN_IDENTITY=$(printf '%s' "${MACOS_SIGN_IDENTITY:-}" | tr -d '\r\n')
     MACOS_KEYCHAIN=$(printf '%s' "${MACOS_KEYCHAIN:-}" | tr -d '\r\n')
     MACOS_NOTARY_PROFILE=$(printf '%s' "${MACOS_NOTARY_PROFILE:-}" | tr -d '\r\n')
@@ -211,7 +212,11 @@ if ! grep -F -- "-DTARGET_PLATFORM=$TARGET_OS" "$BUILD_DIR/cmake_install.cmake" 
     exit 1
 fi
 
-cmake --build "$BUILD_DIR" --config Release --parallel
+if [[ -n "${CMAKE_BUILD_PARALLEL_LEVEL:-}" ]]; then
+    cmake --build "$BUILD_DIR" --config Release --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
+else
+    cmake --build "$BUILD_DIR" --config Release --parallel
+fi
 
 mkdir -p "$PACKAGE_ROOT"
 cmake --install "$BUILD_DIR" --config Release --prefix "$PACKAGE_ROOT"
@@ -242,7 +247,7 @@ if [[ ! -f "$ARCHIVE_PATH" ]]; then
     exit 1
 fi
 
-(cd "$DIST_DIR" && cmake -E sha256sum "$ARCHIVE_FILENAME") > "$CHECKSUM_PATH"
+(cd "$DIST_DIR" && cmake -E sha256sum "$ARCHIVE_FILENAME" | tr -d '\r') > "$CHECKSUM_PATH"
 cmake -E cat "$CHECKSUM_PATH"
 echo "Created release artifact: $ARCHIVE_PATH"
 echo "Created checksum: $CHECKSUM_PATH"

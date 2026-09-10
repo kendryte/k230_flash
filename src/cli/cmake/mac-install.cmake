@@ -39,6 +39,8 @@ function(sign_macho_tree search_root)
     endif()
 
     file(GLOB_RECURSE sign_candidates LIST_DIRECTORIES FALSE "${search_root}/*")
+    list(REMOVE_ITEM sign_candidates "${CLI_PATH}")
+    list(APPEND sign_candidates "${CLI_PATH}")
     foreach(candidate IN LISTS sign_candidates)
         if(IS_SYMLINK "${candidate}")
             continue()
@@ -188,13 +190,26 @@ if(DEFINED ARCHIVE_PATH AND NOT ARCHIVE_PATH STREQUAL "")
             COMMAND "${XCRUN_EXECUTABLE}" notarytool submit "${ARCHIVE_PATH}"
                 --keychain-profile "${NOTARY_PROFILE}"
                 ${NOTARY_KEYCHAIN_ARGS}
-                --wait
+                --wait --output-format json
             RESULT_VARIABLE notary_result
+            OUTPUT_VARIABLE notary_output
             COMMAND_ECHO STDOUT
         )
+        file(WRITE "${ARCHIVE_PATH}.notary.json" "${notary_output}")
         if(NOT notary_result STREQUAL "0")
             message(FATAL_ERROR "Notarization failed for ${ARCHIVE_PATH}")
         endif()
+        find_program(PLUTIL_EXECUTABLE plutil REQUIRED)
+        execute_process(
+            COMMAND "${PLUTIL_EXECUTABLE}" -extract status raw -o - "${ARCHIVE_PATH}.notary.json"
+            RESULT_VARIABLE status_result
+            OUTPUT_VARIABLE notary_status
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        if(NOT status_result STREQUAL "0" OR NOT notary_status STREQUAL "Accepted")
+            message(FATAL_ERROR "Notarization not accepted; see ${ARCHIVE_PATH}.notary.json")
+        endif()
+        message(STATUS "Notarization accepted for ${ARCHIVE_PATH}")
     else()
         message(STATUS "K230_FLASH_MACOS_NOTARY_PROFILE is empty; skipping notarization")
     endif()
