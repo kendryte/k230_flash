@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.0.11 - 2026-09-11
+
+### Fixed
+
+- Use complete physical USB topology paths so devices connected through
+  different hub branches no longer receive the same device address.
+- Skip devices whose physical USB path is unavailable instead of exposing an
+  ambiguous fallback address.
+
+### Added
+
+- Added regression coverage for direct, hub-connected, maximum-depth, invalid,
+  and truncated USB port paths.
+
 ## 0.0.10 - 2026-09-09
 
 ### Added
