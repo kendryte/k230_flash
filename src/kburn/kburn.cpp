@@ -1,4 +1,5 @@
 #include "kburn.h"
+#include "usb_path.h"
 
 #include "3rd-party/libusb-cmake/libusb/libusb/libusb.h"
 #include "k230/kburn_k230.h"
@@ -165,13 +166,35 @@ void kburn_deinitialize(void) {
   KBurn::deleteInstance();
 }
 
-static void usb_get_dev_path(struct libusb_device *dev, char *path_buffer) {
-  uint8_t bus, port;
+static bool usb_get_dev_path(struct libusb_device *dev, char *path_buffer) {
+  static_assert(KBURN_USB_PATH_BUFFER_SIZE >= internal::kUsbPortPathBufferSize);
 
-  bus = libusb_get_bus_number(dev);
-  port = libusb_get_port_number(dev);
+  uint8_t ports[internal::kUsbMaxPortDepth];
+  const uint8_t bus = libusb_get_bus_number(dev);
+  const int port_count =
+      libusb_get_port_numbers(dev, ports, internal::kUsbMaxPortDepth);
 
-  snprintf(path_buffer, KBURN_USB_PATH_BUFERR_SIZE, "%d-%d", bus, port);
+  if (port_count <= 0) {
+    path_buffer[0] = '\0';
+    if (port_count < 0) {
+      spdlog::warn("Can not get USB port path for bus {}, address {}: {}({})",
+                   bus, libusb_get_device_address(dev), port_count,
+                   libusb_error_name(port_count));
+    } else {
+      spdlog::warn("USB port path is unavailable for bus {}, address {}",
+                   bus, libusb_get_device_address(dev));
+    }
+    return false;
+  }
+
+  if (!internal::format_usb_port_path(bus, ports, port_count, path_buffer,
+                                      KBURN_USB_PATH_BUFFER_SIZE)) {
+    spdlog::warn("Can not format USB port path for bus {}, address {}", bus,
+                 libusb_get_device_address(dev));
+    return false;
+  }
+
+  return true;
 }
 
 KBurnUSBDeviceList *list_usb_device_with_vid_pid(uint16_t vid, uint16_t pid) {
@@ -207,7 +230,9 @@ KBurnUSBDeviceList *list_usb_device_with_vid_pid(uint16_t vid, uint16_t pid) {
 
     info.vid = desc.idVendor;
     info.pid = desc.idProduct;
-    usb_get_dev_path(dev, info.path);
+    if (!usb_get_dev_path(dev, info.path)) {
+      continue;
+    }
 
     for(int retry = 0; retry < 3; retry++) {
       if(LIBUSB_SUCCESS == (result = libusb_open(dev, &node.handle))) {
@@ -239,7 +264,7 @@ KBurnUSBDeviceList *list_usb_device_with_vid_pid(uint16_t vid, uint16_t pid) {
 }
 
 struct kburn_usb_node *open_usb_dev_with_info(struct kburn_usb_dev_info &info) {
-  char dev_path[KBURN_USB_PATH_BUFERR_SIZE];
+  char dev_path[KBURN_USB_PATH_BUFFER_SIZE];
 
   struct kburn_usb_node *node = NULL;
 
@@ -272,9 +297,11 @@ struct kburn_usb_node *open_usb_dev_with_info(struct kburn_usb_dev_info &info) {
       continue;
     }
 
-    usb_get_dev_path(dev, dev_path);
+    if (!usb_get_dev_path(dev, dev_path)) {
+      continue;
+    }
 
-    if (0x00 != strncmp(dev_path, info.path, KBURN_USB_PATH_BUFERR_SIZE)) {
+    if (0x00 != strncmp(dev_path, info.path, KBURN_USB_PATH_BUFFER_SIZE)) {
       continue;
     }
 

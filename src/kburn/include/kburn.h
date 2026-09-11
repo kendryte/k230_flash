@@ -20,7 +20,10 @@ namespace Kendryte_Burning_Tool {
 #define KBURN_FLAG_VAL1(flg)    ((flg >> 16) & 0xffffffff)
 #define KBURN_FLAG_VAL2(flg)    (flg & 0xffff)
 
-#define KBURN_USB_PATH_BUFERR_SIZE (8)
+// "255-255.255.255.255.255.255.255" plus the null terminator.
+#define KBURN_USB_PATH_BUFFER_SIZE (32)
+// Keep the original misspelled name for source compatibility.
+#define KBURN_USB_PATH_BUFERR_SIZE KBURN_USB_PATH_BUFFER_SIZE
 
 #if defined(_WIN32)
     #ifdef kburn_EXPORTS
@@ -52,7 +55,7 @@ struct kburn_usb_dev_info {
   enum kburn_usb_dev_type type;
 
   uint16_t vid, pid;
-  char path[KBURN_USB_PATH_BUFERR_SIZE];
+  char path[KBURN_USB_PATH_BUFFER_SIZE];
 };
 
 struct kburn_usb_node {

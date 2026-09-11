@@ -74,6 +74,7 @@ file(GLOB K230_SRCS "burner_k230/*.cpp")
 set(SRCS
     kburn.cpp
     kdimage.cpp
+    usb_path.cpp
     ${K230_SRCS}
 )
 
@@ -134,6 +135,18 @@ set_target_properties(usb-1.0 PROPERTIES
 
 add_dependencies(kburn usb-1.0)
 target_link_libraries(kburn PUBLIC usb-1.0)
+
+if(BUILD_TESTING)
+	add_executable(kburn_usb_path_test
+		tests/usb_path_test.cpp
+		usb_path.cpp
+	)
+	target_include_directories(kburn_usb_path_test PRIVATE
+		${CMAKE_CURRENT_SOURCE_DIR}
+	)
+	set_target_properties(kburn_usb_path_test PROPERTIES CXX_STANDARD 17)
+	add_test(NAME kburn_usb_path_test COMMAND kburn_usb_path_test)
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IS_CIBUILDWHEEL)
 	message("Build by CIBUILDWHEEL")

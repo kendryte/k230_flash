@@ -342,7 +342,8 @@ int main(int argc, char **argv) {
     std::string device_address;
     bool list_device = false;
     app.add_flag("-l,--list-device", list_device, "List connected devices");
-    app.add_option("-d,--device-address", device_address, "Device address (format: 1-1 or 3-1), shown by '--list-device'")
+    app.add_option("-d,--device-address", device_address,
+                   "USB port path (for example 1-1 or 1-5.3.2), shown by 'devices'")
         ->default_str("");
 
     enum KBurnMediumType medium_type = KBURN_MEDIUM_EMMC;

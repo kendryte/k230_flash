@@ -19,6 +19,12 @@ k230_flash_cli erase --address 0 --size 0x20000 --medium-type SPI_NAND
 `--log-level LEVEL` 和 `--auto-reboot`。介质名称包括 `EMMC`、`SDCARD`、
 `SPI_NAND`、`SPI_NOR` 和 `OTP`。
 
+`devices` 会显示每块开发板的完整物理 USB 端口路径。直连设备的路径类似
+`1-1`，经过 USB Hub 的设备路径类似 `1-5.3.2`。选择开发板时，请将该完整
+路径传给 `--device-address`。
+如果系统无法提供设备的物理 USB 路径，`devices` 会跳过该设备，因为设备重新
+枚举后无法可靠地再次选择它。
+
 烧录文件使用 `地址 文件` 参数对。数字参数支持十进制和 `0x` 前缀的十六进制格式。
 使用 `--loader` 指定设备操作使用的自定义 loader，可以使用 `--loader-address`
 修改其加载地址。这些选项可用于 `flash`、`read` 和 `erase` 命令。

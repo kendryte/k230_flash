@@ -20,6 +20,12 @@ Common options are `--device-address PATH`, `--medium-type TYPE`,
 `--log-level LEVEL`, and `--auto-reboot`. Medium names are `EMMC`, `SDCARD`,
 `SPI_NAND`, `SPI_NOR`, and `OTP`.
 
+`devices` prints each board's full physical USB port path. Directly connected
+devices use paths such as `1-1`; devices behind hubs use paths such as
+`1-5.3.2`. Pass that complete path to `--device-address` when selecting a board.
+Devices without an available physical USB path are skipped because they cannot
+be selected reliably across re-enumeration.
+
 Flash inputs use `ADDRESS FILE` pairs. Numeric values accept decimal or `0x`
 notation. `--loader` selects a custom loader for the device operation;
 `--loader-address` may be used to change its load address. These options can be

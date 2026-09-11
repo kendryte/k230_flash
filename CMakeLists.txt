@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.18)
 
 project(kburn_top)
 
+include(CTest)
+
 set(K230_FLASH_MACOS_SIGN_IDENTITY "" CACHE STRING
     "Developer ID Application identity used to sign installed macOS binaries")
 set(K230_FLASH_MACOS_NOTARY_PROFILE "" CACHE STRING
