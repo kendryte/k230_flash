@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.0.12 - 2026-09-28
+
+### Added
+
+- Added public OTP programming with a dedicated embedded OTP loader.
+- Added optional device-side SHA-256 readback verification through
+  `flash --verify`.
+- Added `--version` output and startup logging with the build commit ID.
+- Added regression coverage for KDImage parsing and validation.
+
+### Changed
+
+- Stream KDImage partitions directly from the source image instead of
+  extracting temporary files, with 64-bit offset and size handling.
+- Updated the embedded MMC, OTP, SPI NAND, and SPI NOR loaders.
+
+### Fixed
+
+- Validate KDImage header and partition-table checksums, metadata, source
+  hashes, and partition ranges before burning.
+- Harden loader communication against stale USB responses, synchronization
+  failures, invalid transfer ranges, and probe timeouts.
+
 ## 0.0.11 - 2026-09-11
 
 ### Fixed

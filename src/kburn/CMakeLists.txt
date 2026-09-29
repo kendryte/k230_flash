@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.18)
 
 function(load_binary target variable src)
+	set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${src}")
 	file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_LIST_DIR}" "${src}")
 	set(tgt "${CMAKE_CURRENT_BINARY_DIR}/${rel_path}.generate.c")
 	set(tgt_hdr "${CMAKE_CURRENT_BINARY_DIR}/autogen/generated.${variable}.h")
@@ -25,7 +26,7 @@ function(load_binary target variable src)
 	target_sources("${target}" PRIVATE "${tgt}")
 endfunction()
 
-set(K230_FLASH_VERSION_STRING "0.0.11")
+set(K230_FLASH_VERSION_STRING "0.0.12")
 message(STATUS "K230_FLASH_VERSION_STRING = ${K230_FLASH_VERSION_STRING}")
 
 option(IS_CIBUILDWHEEL "Build in cibuildwheel docker" OFF)
@@ -47,6 +48,10 @@ if(NOT GIT_COMMIT_ENV)
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
     )
+endif()
+
+if(NOT GIT_COMMIT_ENV)
+    set(GIT_COMMIT_ENV "unknown")
 endif()
 
 # Print the commit hash
@@ -77,6 +82,7 @@ target_include_directories(kburn PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/autogen)
 load_binary(kburn "k230_loader_mmc" "${CMAKE_CURRENT_LIST_DIR}/burner_k230/loader/loader_mmc.bin")
 load_binary(kburn "k230_loader_spi_nand" "${CMAKE_CURRENT_LIST_DIR}/burner_k230/loader/loader_spi_nand.bin")
 load_binary(kburn "k230_loader_spi_nor" "${CMAKE_CURRENT_LIST_DIR}/burner_k230/loader/loader_spi_nor.bin")
+load_binary(kburn "k230_loader_otp" "${CMAKE_CURRENT_LIST_DIR}/burner_k230/loader/loader_otp.bin")
 
 target_compile_definitions(kburn PRIVATE
     $<$<CONFIG:Debug>:IS_DEBUG=1>
@@ -138,6 +144,11 @@ if(BUILD_TESTING)
 	)
 	set_target_properties(kburn_usb_path_test PROPERTIES CXX_STANDARD 17)
 	add_test(NAME kburn_usb_path_test COMMAND kburn_usb_path_test)
+
+	add_executable(kburn_kdimage_test tests/kdimage_test.cpp)
+	target_link_libraries(kburn_kdimage_test PRIVATE kburn)
+	set_target_properties(kburn_kdimage_test PROPERTIES CXX_STANDARD 17)
+	add_test(NAME kburn_kdimage_test COMMAND kburn_kdimage_test)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND IS_CIBUILDWHEEL)

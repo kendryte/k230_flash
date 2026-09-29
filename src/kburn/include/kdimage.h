@@ -3,14 +3,11 @@
 #include "kburn.h"
 
 #include <algorithm>
-#include <filesystem>
+#include <array>
+#include <cstdint>
 #include <fstream>
-#include <iomanip>
 #include <string>
-#include <stdexcept>
 #include <vector>
-
-#include "picosha2.h"
 
 namespace Kendryte_Burning_Tool {
 #define KDIMG_HADER_MAGIC   (0x27CB8F93)
@@ -64,13 +61,18 @@ struct KburnImageItem_t {
     }
 
 	std::string partName;
-	uint32_t partOffset;
-	uint32_t partSize;
-	uint32_t partEraseSize;
-    uint64_t partFlag;
+	uint64_t partOffset = 0;
+	uint64_t partSize = 0;
+	uint64_t partEraseSize = 0;
+	uint64_t partFlag = 0;
 
 	std::string fileName;
-	uint32_t fileSize;
+	uint64_t fileOffset = 0;
+	uint64_t dataSize = 0;
+	uint64_t fileSize = 0;
+	uint8_t paddingValue = 0;
+	bool verifyDataHash = false;
+	std::array<uint8_t, 32> dataSha256{};
 };
 
 class KBURN_API KburnImageItemList {
@@ -134,31 +136,6 @@ private:
     std::vector<struct KburnImageItem_t> data_;
 };
 
-class SHA256 {
-public:
-    SHA256() {
-        // Initialize the hash256_one_by_one object
-        hasher_.init();
-    }
-
-    void update(const void *data, size_t length) {
-        // Update the hash with new data
-        const unsigned char *byteData = reinterpret_cast<const unsigned char*>(data);
-        hasher_.process(byteData, byteData + length);
-    }
-
-    std::string final() {
-        // Finalize the hash and return the result
-        hasher_.finish();
-        return get_hash_hex_string(hasher_);
-    }
-
-    static constexpr uint32_t SHA256_DIGEST_LENGTH = 32;
-
-private:
-    picosha2::hash256_one_by_one hasher_; // Incremental SHA-256 hasher
-};
-
 class KBURN_API KburnKdImage {
 public:
     KburnKdImage() {}
@@ -169,8 +146,8 @@ public:
         _image_path = path;
     }
 
-    size_t max_offset(void) {
-        size_t size, curr, max = 0x00;
+    uint64_t max_offset(void) {
+        uint64_t size, curr, max = 0x00;
 
         for(const auto &item : _items) {
             size = item.partSize;
@@ -206,21 +183,16 @@ public:
 private:
     static KburnKdImage *_instance;
 
-    static constexpr size_t ChunkSize = 4 * 1024 * 1024;      // 4 MiB
-
     std::string _image_path;
     std::ifstream _image_file;
     KburnImageItemList _items;
 
     struct kd_img_hdr_t _header;
     std::vector<struct kd_img_part_t> _curr_parts;
-    std::vector<struct kd_img_part_t> _last_parts;
 private:
     static void createInstance();
 
     bool parse_parts(void);
-    bool extract_parts(void);
-    void get_parts_from_temp(void);
     void convert_parts_to_items();
 
     void dump_header(void);
@@ -229,6 +201,6 @@ private:
 
 KBURN_API KburnImageItemList *get_kdimage_items(const std::string &image_path);
 
-KBURN_API size_t get_kdimage_max_offset(void);
+KBURN_API uint64_t get_kdimage_max_offset(void);
 
 }; // namespace Kendryte_Burning_Tool

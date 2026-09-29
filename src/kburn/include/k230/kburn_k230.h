@@ -101,10 +101,20 @@ public:
   }
 
   bool write_stream(std::ifstream& file_stream, size_t size, uint64_t address, uint64_t max, uint64_t flag);
+  bool write_stream(std::ifstream& file_stream, size_t size, uint64_t address,
+                    uint64_t max, uint64_t flag, size_t source_size,
+                    uint8_t padding_value,
+                    const uint8_t expected_source_sha256[32]);
 
   bool read(void *data, size_t size, uint64_t address);
 
   bool erase(uint64_t address, size_t size);
+
+  void set_verify_after_write(bool enable) { verify_after_write_ = enable; }
+  uint64_t get_last_verify_bytes() const { return last_verify_bytes_; }
+  uint64_t get_last_verify_elapsed_ms() const {
+    return last_verify_elapsed_ms_;
+  }
 
 private:
   bool probe_succ = false;
@@ -113,6 +123,10 @@ private:
   uint64_t in_chunk_size = 512;
 
   std::vector<uint8_t> wr_buffer;
+
+  bool verify_after_write_ = false;
+  uint64_t last_verify_bytes_ = 0;
+  uint64_t last_verify_elapsed_ms_ = 0;
 
   struct kburn_t kburn_;
 };

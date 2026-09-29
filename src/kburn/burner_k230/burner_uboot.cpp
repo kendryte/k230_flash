@@ -1,13 +1,17 @@
 #include "k230/kburn_k230.h"
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <memory>
+
+#include "picosha2.h"
 
 namespace Kendryte_Burning_Tool {
 
 namespace K230 {
 
 #define CMD_FLAG_DEV_TO_HOST (0x8000)
+#define KBURN_MAX_STALE_RESPONSES (8)
 
 enum kburn_pkt_cmd {
   KBURN_CMD_NONE = 0,
@@ -23,6 +27,7 @@ enum kburn_pkt_cmd {
 
 	KBURN_CMD_READ_LBA = 0x23,
 	KBURN_CMD_READ_LBA_CHUNK = 0x24,
+	KBURN_CMD_VERIFY_LBA = 0x25,
 
   KBURN_CMD_MAX,
 };
@@ -287,6 +292,42 @@ static bool kburn_parse_resp(struct kburn_usb_pkt_wrap *csw, kburn_t *kburn,
   return true;
 }
 
+static bool kburn_read_response(kburn_t *kburn, enum kburn_pkt_cmd cmd,
+                                struct kburn_usb_pkt_wrap *csw,
+                                int *is_timeout) {
+  const uint16_t expected_cmd =
+      static_cast<uint16_t>(cmd | CMD_FLAG_DEV_TO_HOST);
+  unsigned int discarded = 0;
+
+  if (!kburn || !csw)
+    return false;
+
+  if (is_timeout)
+    *is_timeout = 0;
+
+  for (;;) {
+    memset(csw, 0, sizeof(*csw));
+    if (!kburn_read_data(kburn, csw, sizeof(*csw), is_timeout))
+      return false;
+
+    if (csw->hdr.data_size <= sizeof(csw->data) &&
+        csw->hdr.cmd == expected_cmd &&
+        (cmd != KBURN_CMD_NONE || csw->hdr.result == KBURN_RESULT_OK))
+      return true;
+
+    spdlog::warn(
+        "discard stale response cmd 0x{:04x} result 0x{:04x} size {} while waiting for 0x{:04x}",
+        csw->hdr.cmd, csw->hdr.result, csw->hdr.data_size, expected_cmd);
+
+    if (discarded++ >= KBURN_MAX_STALE_RESPONSES) {
+      strncpy(kburn->error_msg, "too many stale responses",
+              sizeof(kburn->error_msg));
+      kburn->error_msg[sizeof(kburn->error_msg) - 1] = '\0';
+      return false;
+    }
+  }
+}
+
 static bool kburn_send_cmd(kburn_t *kburn, enum kburn_pkt_cmd cmd, void *data,
                            int size, void *result, int *result_size) {
   struct kburn_usb_pkt_wrap cbw, csw;
@@ -314,7 +355,7 @@ static bool kburn_send_cmd(kburn_t *kburn, enum kburn_pkt_cmd cmd, void *data,
     return false;
   }
 
-  if (false == kburn_read_data(kburn, &csw, sizeof(csw), NULL)) {
+  if (!kburn_read_response(kburn, cmd, &csw, NULL)) {
     spdlog::error("command recv data failed");
 
     strncpy(kburn->error_msg, "cmd recv failed", sizeof(kburn->error_msg));
@@ -325,25 +366,83 @@ static bool kburn_send_cmd(kburn_t *kburn, enum kburn_pkt_cmd cmd, void *data,
   return kburn_parse_resp(&csw, kburn, cmd, result, result_size);
 }
 
-void kburn_nop(struct kburn_t *kburn) {
+static bool kburn_verify_sha256(kburn_t *kburn, uint64_t offset,
+                                uint64_t size,
+                                const uint8_t expected_digest[32],
+                                uint64_t *elapsed_ms) {
+  constexpr size_t digest_size = 32;
+  constexpr size_t result_size_expected = digest_size + sizeof(uint64_t) * 2;
+  uint64_t cfg[2] = {offset, size};
+  std::array<uint8_t, result_size_expected> result{};
+  int result_size = static_cast<int>(result.size());
+  uint32_t old_timeout;
+  uint64_t verified_size;
+  uint64_t verify_elapsed_ms;
+  bool success;
+
+  if (!kburn || !expected_digest || !elapsed_ms || !size)
+    return false;
+  if (kburn->loader_version < 2) {
+    strncpy(kburn->error_msg, "loader does not support verification",
+            sizeof(kburn->error_msg));
+    kburn->error_msg[sizeof(kburn->error_msg) - 1] = '\0';
+    return false;
+  }
+
+  old_timeout = static_cast<uint32_t>(kburn->medium_info.timeout_ms);
+  kburn->medium_info.timeout_ms = std::max<uint32_t>(old_timeout, 300000);
+  success = kburn_send_cmd(kburn, KBURN_CMD_VERIFY_LBA, cfg, sizeof(cfg),
+                           result.data(), &result_size);
+  kburn->medium_info.timeout_ms = old_timeout;
+  if (!success)
+    return false;
+  if (result_size != static_cast<int>(result.size())) {
+    strncpy(kburn->error_msg, "invalid verify response size",
+            sizeof(kburn->error_msg));
+    kburn->error_msg[sizeof(kburn->error_msg) - 1] = '\0';
+    return false;
+  }
+
+  memcpy(&verified_size, result.data() + digest_size,
+         sizeof(verified_size));
+  memcpy(&verify_elapsed_ms,
+         result.data() + digest_size + sizeof(verified_size),
+         sizeof(verify_elapsed_ms));
+  if (verified_size != size) {
+    strncpy(kburn->error_msg, "verify byte count mismatch",
+            sizeof(kburn->error_msg));
+    kburn->error_msg[sizeof(kburn->error_msg) - 1] = '\0';
+    return false;
+  }
+  if (memcmp(result.data(), expected_digest, digest_size) != 0) {
+    std::string expected = picosha2::bytes_to_hex_string(
+        expected_digest, expected_digest + digest_size);
+    std::string actual = picosha2::bytes_to_hex_string(
+        result.data(), result.data() + digest_size);
+    spdlog::error("verify SHA-256 mismatch, expected {}, actual {}",
+                  expected, actual);
+    strncpy(kburn->error_msg, "verify SHA-256 mismatch",
+            sizeof(kburn->error_msg));
+    kburn->error_msg[sizeof(kburn->error_msg) - 1] = '\0';
+    return false;
+  }
+
+  *elapsed_ms = verify_elapsed_ms;
+  return true;
+}
+
+bool kburn_nop(struct kburn_t *kburn) {
+  if (!kburn)
+    return false;
+
   uint32_t timeout_ms = kburn->medium_info.timeout_ms;
 
   spdlog::debug("issue a nop command, clear device error status");
+  kburn->medium_info.timeout_ms = std::max<uint32_t>(timeout_ms, 1000);
 
-  // issue a command, clear device state
-  spdlog::level::level_enum old_level = spdlog::get_level();
-
-  spdlog::set_level(spdlog::level::level_enum::off);
-
-  /* read last packet */
-  struct kburn_usb_pkt_wrap csw;
-  kburn->medium_info.timeout_ms = 50;
-  kburn_read_data(kburn, &csw, sizeof(csw), NULL);
+  bool success = kburn_send_cmd(kburn, KBURN_CMD_NONE, NULL, 0, NULL, NULL);
   kburn->medium_info.timeout_ms = timeout_ms;
-
-  kburn_send_cmd(kburn, KBURN_CMD_NONE, NULL, 0, NULL, NULL);
-
-  spdlog::set_level(old_level);
+  return success;
 }
 
 bool kburn_parse_erase_config(struct kburn_t *kburn, uint64_t *offset,
@@ -515,7 +614,8 @@ bool kburn_erase(struct kburn_t *kburn, uint64_t offset, uint64_t size,
   do {
     is_timeout = 0;
 
-    if (true == kburn_read_data(kburn, &csw, sizeof(cbw), &is_timeout)) {
+    if (kburn_read_response(kburn, KBURN_CMD_ERASE_LBA, &csw,
+                            &is_timeout)) {
       break;
     }
 
@@ -637,7 +737,7 @@ bool kburn_write_chunk(struct kburn_t *kburn, const void *data, uint64_t size) {
 
   spdlog::error("kburn write medium chunk failed,");
 
-  if (false == kburn_read_data(kburn, &csw, sizeof(csw), NULL)) {
+  if (!kburn_read_response(kburn, KBURN_CMD_WRITE_LBA, &csw, NULL)) {
     spdlog::error(
         "kburn write medium chunk failed, recv error msg failed too.");
 
@@ -661,7 +761,7 @@ bool kbrun_write_end(struct kburn_t *kburn) {
 		return false;
 	}
 
-  if (false == kburn_read_data(kburn, &csw, sizeof(csw), NULL)) {
+  if (!kburn_read_response(kburn, KBURN_CMD_WRITE_LBA, &csw, NULL)) {
     spdlog::error("kburn write medium end, recv error msg failed.");
 
     return false;
@@ -670,7 +770,8 @@ bool kbrun_write_end(struct kburn_t *kburn) {
 	if (!kburn_parse_resp(&csw, kburn, KBURN_CMD_WRITE_LBA, nullptr, nullptr))
 		return false;
 
-  kburn_nop(kburn);
+	if (!kburn_nop(kburn))
+		return false;
 	kburn->dl_total = 0;
 	kburn->dl_sent = 0;
 
@@ -758,7 +859,7 @@ bool kburn_read_chunk(struct kburn_t *kburn, void *data, uint64_t size) {
 bool kbrun_read_end(struct kburn_t *kburn) {
   struct kburn_usb_pkt_wrap csw;
 
-  if (false == kburn_read_data(kburn, &csw, sizeof(csw), NULL)) {
+  if (!kburn_read_response(kburn, KBURN_CMD_READ_LBA_CHUNK, &csw, NULL)) {
     spdlog::error("kburn read medium end, recv error msg failed.");
 
     return false;
@@ -771,7 +872,7 @@ bool kbrun_read_end(struct kburn_t *kburn) {
 K230UBOOTBurner::K230UBOOTBurner(struct kburn_usb_node *node)
 	: KBurner(node), kburn_{} {
   kburn_.node = node;
-  kburn_.medium_info.timeout_ms = 10;
+  kburn_.medium_info.timeout_ms = 1000;
 
 	  if (LIBUSB_SUCCESS != __get_endpoint(&kburn_)) {
 	    spdlog::error("kburn get ep failed");
@@ -783,9 +884,13 @@ K230UBOOTBurner::K230UBOOTBurner(struct kburn_usb_node *node)
   kburn_.loader_version = kburn_probe_loader_version(&kburn_);
 
   /* clear error status */
-  kburn_nop(&kburn_);
+  if (!kburn_nop(&kburn_)) {
+    spdlog::error("kburn loader synchronization failed");
+    endpoints_valid = false;
+    return;
+  }
 
-  kburn_.medium_info.timeout_ms = 10000; // set a longer timeout for probe medium info
+  kburn_.medium_info.timeout_ms = 30000;
 }
 
 bool K230UBOOTBurner::probe(void) {
@@ -813,15 +918,39 @@ bool K230UBOOTBurner::reboot(void) {
 }
 
 bool K230UBOOTBurner::write_stream(std::ifstream& file_stream, size_t size, uint64_t address, uint64_t max, uint64_t flag) {
-  size_t bytes_per_send, bytes_sent = 0, total_size = 0;
+  return write_stream(file_stream, size, address, max, flag, size, 0, nullptr);
+}
 
-	  size_t blk_size = kburn_.medium_info.blk_size;
-	if (!size || !blk_size || !out_chunk_size || size > SIZE_MAX - (blk_size - 1))
-		return false;
-	  size_t aligned_size = (size + blk_size - 1) / blk_size * blk_size;
-	  size_t chunk_size = out_chunk_size / blk_size * blk_size;
-	if (!chunk_size)
-		return false;
+bool K230UBOOTBurner::write_stream(std::ifstream& file_stream, size_t size,
+                                   uint64_t address, uint64_t max,
+                                   uint64_t flag, size_t source_size,
+                                   uint8_t padding_value,
+                                   const uint8_t expected_source_sha256[32]) {
+  size_t bytes_per_send, bytes_sent = 0, total_size = 0;
+  picosha2::hash256_one_by_one write_hash;
+  std::array<uint8_t, picosha2::k_digest_size> expected_digest{};
+  picosha2::hash256_one_by_one source_hash;
+  std::array<uint8_t, picosha2::k_digest_size> source_digest{};
+  bool verify_main_data_only = false;
+  size_t verify_page_size = 0;
+  size_t verify_record_size = 0;
+  uint64_t verify_size = 0;
+
+  last_verify_bytes_ = 0;
+  last_verify_elapsed_ms_ = 0;
+  if (verify_after_write_ && kburn_.loader_version < 2) {
+    spdlog::error("loader does not support readback verification");
+    return false;
+  }
+
+  size_t blk_size = kburn_.medium_info.blk_size;
+  if (!size || source_size > size || !blk_size || !out_chunk_size ||
+      size > SIZE_MAX - (blk_size - 1))
+    return false;
+  size_t aligned_size = (size + blk_size - 1) / blk_size * blk_size;
+  size_t chunk_size = out_chunk_size / blk_size * blk_size;
+  if (!chunk_size)
+    return false;
 
   uint64_t flag_flag, flag_val1, flag_val2;
 
@@ -831,16 +960,22 @@ bool K230UBOOTBurner::write_stream(std::ifstream& file_stream, size_t size, uint
 
   if ((KBURN_FLAG_SPI_NAND_WRITE_WITH_OOB == flag_flag) &&
       (KBURN_MEDIUM_SPI_NAND == kburn_.medium_info.type)) {
-	      uint64_t page_size_with_oob = flag_val1 + flag_val2;
-		if (!flag_val1 || !flag_val2 || page_size_with_oob < flag_val1 ||
-		    out_chunk_size <= page_size_with_oob ||
-		    size > SIZE_MAX - (page_size_with_oob - 1))
-			return false;
+      uint64_t page_size_with_oob = flag_val1 + flag_val2;
+      if (!flag_val1 || !flag_val2 || page_size_with_oob < flag_val1 ||
+          out_chunk_size / page_size_with_oob <= 1 ||
+          size > SIZE_MAX - (page_size_with_oob - 1))
+        return false;
 
       blk_size = page_size_with_oob;
       aligned_size = (size + blk_size - 1) / blk_size * blk_size;
       chunk_size = ((chunk_size / page_size_with_oob) - 1) * page_size_with_oob;
+      verify_main_data_only = true;
+      verify_page_size = static_cast<size_t>(flag_val1);
+      verify_record_size = static_cast<size_t>(page_size_with_oob);
   }
+  verify_size = verify_main_data_only
+      ? aligned_size / verify_record_size * verify_page_size
+      : aligned_size;
 
   if (aligned_size != size) {
       spdlog::warn("uboot burner, aligned write size from {} to {}", size, aligned_size);
@@ -859,27 +994,80 @@ bool K230UBOOTBurner::write_stream(std::ifstream& file_stream, size_t size, uint
   std::vector<uint8_t> buffer(chunk_size, 0);
 
   while (bytes_sent < total_size) {
-      bytes_per_send = std::min(chunk_size, total_size - bytes_sent);
-      file_stream.read(reinterpret_cast<char*>(buffer.data()), bytes_per_send);
+    bytes_per_send = std::min(chunk_size, total_size - bytes_sent);
+    const size_t logical_bytes = bytes_sent < size
+        ? std::min(bytes_per_send, size - bytes_sent)
+        : 0;
+    const size_t source_bytes = bytes_sent < source_size
+        ? std::min(logical_bytes, source_size - bytes_sent)
+        : 0;
 
-      std::streamsize read_count = file_stream.gcount();
-      if (read_count < static_cast<std::streamsize>(bytes_per_send)) {
-          // Pad with zeroes if not enough data (end of file)
-          std::fill(buffer.begin() + read_count, buffer.begin() + bytes_per_send, 0);
+    if (source_bytes) {
+      file_stream.read(reinterpret_cast<char*>(buffer.data()), source_bytes);
+      if (file_stream.gcount() != static_cast<std::streamsize>(source_bytes)) {
+        spdlog::error("image source ended early @ {}", bytes_sent);
+        return false;
       }
-
-      if (!kburn_write_chunk(&kburn_, buffer.data(), bytes_per_send)) {
-          spdlog::error("write failed @ {}", bytes_sent);
-          return false;
+      if (expected_source_sha256) {
+        source_hash.process(buffer.begin(), buffer.begin() + source_bytes);
       }
+    }
+    std::fill(buffer.begin() + source_bytes,
+              buffer.begin() + logical_bytes, padding_value);
+    std::fill(buffer.begin() + logical_bytes,
+              buffer.begin() + bytes_per_send, 0);
 
-      bytes_sent += bytes_per_send;
-      log_progress(bytes_sent, total_size);
+    if (!kburn_write_chunk(&kburn_, buffer.data(), bytes_per_send)) {
+      spdlog::error("write failed @ {}", bytes_sent);
+      return false;
+    }
+    if (verify_after_write_) {
+      if (verify_main_data_only) {
+        for (size_t offset = 0; offset < bytes_per_send;
+             offset += verify_record_size) {
+          write_hash.process(buffer.begin() + offset,
+                             buffer.begin() + offset + verify_page_size);
+        }
+      } else {
+        write_hash.process(buffer.begin(),
+                           buffer.begin() + bytes_per_send);
+      }
+    }
+
+    bytes_sent += bytes_per_send;
+    log_progress(bytes_sent, total_size);
+  }
+
+  if (expected_source_sha256) {
+    source_hash.finish();
+    source_hash.get_hash_bytes(source_digest.begin(), source_digest.end());
+    if (!std::equal(source_digest.begin(), source_digest.end(),
+                    expected_source_sha256)) {
+      spdlog::error("kdimage source SHA-256 mismatch, expected {}, actual {}",
+                    picosha2::bytes_to_hex_string(
+                        expected_source_sha256,
+                        expected_source_sha256 + source_digest.size()),
+                    picosha2::bytes_to_hex_string(source_digest));
+      return false;
+    }
   }
 
   if (!kbrun_write_end(&kburn_)) {
-      spdlog::error("uboot burner, finish write failed");
+    spdlog::error("uboot burner, finish write failed");
+    return false;
+  }
+
+  if (verify_after_write_) {
+    write_hash.finish();
+    write_hash.get_hash_bytes(expected_digest.begin(),
+                              expected_digest.end());
+    if (!kburn_verify_sha256(&kburn_, address, verify_size,
+                             expected_digest.data(),
+                             &last_verify_elapsed_ms_)) {
+      spdlog::error("uboot burner, readback verification failed");
       return false;
+    }
+    last_verify_bytes_ = verify_size;
   }
 
   return true;

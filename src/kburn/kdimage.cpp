@@ -1,6 +1,7 @@
 #include "kdimage.h"
 
-#include <filesystem>
+#include <cstring>
+#include <limits>
 
 namespace Kendryte_Burning_Tool {
 
@@ -64,16 +65,12 @@ uint32_t crc32(uint32_t crc, const unsigned char *buf, uint32_t len)
     return res ^ 0xffffffffL;
 }
 
-std::string to_hex_string(const unsigned char *data, size_t length) {
-    // Each byte is represented by 2 hex characters, so allocate 2 * length + 1 (for null terminator)
-    std::string result(length * 2, '\0'); // Pre-allocate the string
-
-    for (size_t i = 0; i < length; ++i) {
-        // Use snprintf to format each byte as a 2-character hex string
-        std::snprintf(&result[i * 2], 3, "%02x", data[i]);
-    }
-
-    return result;
+static std::string fixed_string(const char *data, size_t size) {
+    const void *terminator = std::memchr(data, '\0', size);
+    const size_t length = terminator
+        ? static_cast<const char *>(terminator) - data
+        : size;
+    return std::string(data, length);
 }
 
 KburnImageItemList *get_kdimage_items(const std::string &image_path) {
@@ -82,7 +79,7 @@ KburnImageItemList *get_kdimage_items(const std::string &image_path) {
     return KburnKdImage::instance()->items();
 }
 
-size_t get_kdimage_max_offset(void) {
+uint64_t get_kdimage_max_offset(void) {
     return KburnKdImage::instance()->max_offset();
 }
 
@@ -120,16 +117,16 @@ void KburnKdImage::dump_header(void) {
     spdlog::debug("\tHeader Version: 0x{:X}", _header.img_hdr_version);
     spdlog::debug("\tPart Table Num: {}", _header.part_tbl_num);
     spdlog::debug("\tPart Table CRC32: 0x{:X}", _header.part_tbl_crc32);
-    spdlog::debug("\tImage Info: {}", _header.image_info);
-    spdlog::debug("\tChip Info: {}", _header.chip_info);
-    spdlog::debug("\tBoard Info: {}", _header.board_info);
+    spdlog::debug("\tImage Info: {}", fixed_string(_header.image_info, sizeof(_header.image_info)));
+    spdlog::debug("\tChip Info: {}", fixed_string(_header.chip_info, sizeof(_header.chip_info)));
+    spdlog::debug("\tBoard Info: {}", fixed_string(_header.board_info, sizeof(_header.board_info)));
 }
 
 // Dump parts information using spdlog
 void KburnKdImage::dump_parts(std::vector<struct kd_img_part_t> parts) {
     spdlog::debug("Dumping parts information:");
     for (const auto &part : parts) {
-        spdlog::debug("Part Name: {}", part.part_name);
+        spdlog::debug("Part Name: {}", fixed_string(part.part_name, sizeof(part.part_name)));
         spdlog::debug("\tPart Magic: 0x{:X}", part.part_magic);
         spdlog::debug("\tPart Offset: 0x{:X}", part.part_offset);
         spdlog::debug("\tPart Size: 0x{:X}", part.part_size);
@@ -151,10 +148,23 @@ bool KburnKdImage::parse_parts(void) {
         return false;
     }
 
-    _image_file.seekg(0, std::ios::beg); // Go back to the beginning
+    _image_file.clear();
+    _image_file.seekg(0, std::ios::end);
+    const std::streamoff image_size_value = _image_file.tellg();
+    if (image_size_value < static_cast<std::streamoff>(sizeof(kd_img_hdr_t))) {
+        spdlog::error("Error: kdimage is too small");
+        return false;
+    }
+    const uint64_t image_size = static_cast<uint64_t>(image_size_value);
+    _image_file.seekg(0, std::ios::beg);
 
     // Read the header
+    _header = {};
     _image_file.read(reinterpret_cast<char *>(&_header), sizeof(kd_img_hdr_t));
+    if (_image_file.gcount() != static_cast<std::streamsize>(sizeof(kd_img_hdr_t))) {
+        spdlog::error("Error: Failed to read full image header");
+        return false;
+    }
     if (_header.img_hdr_magic != KDIMG_HADER_MAGIC) {
         spdlog::error("Error: Invalid image header magic! 0x{:08X} != 0x{:08X}", KDIMG_HADER_MAGIC, _header.img_hdr_magic);
 
@@ -163,20 +173,34 @@ bool KburnKdImage::parse_parts(void) {
 
     // Verify header CRC32
     read_crc32 = _header.img_hdr_crc32;
-    _header.img_hdr_crc32 = 0x00;
-
-    calc_crc32 = crc32(0, reinterpret_cast<const unsigned char *>(&_header), sizeof(kd_img_hdr_t));
+    kd_img_hdr_t header_for_crc = _header;
+    header_for_crc.img_hdr_crc32 = 0;
+    calc_crc32 = crc32(0, reinterpret_cast<const unsigned char *>(&header_for_crc), sizeof(header_for_crc));
     if(read_crc32 != calc_crc32) {
         spdlog::error("Error: Invalid image header checksum! 0x{:08X} != 0x{:08X}", read_crc32, calc_crc32);
 
         return false;
     }
-    _header.img_hdr_crc32 = read_crc32;
 
     // Read the part table
-    size_t sizePartsContent = _header.part_tbl_num * sizeof(kd_img_part_t);
+    if (!_header.part_tbl_num) {
+        spdlog::error("Error: kdimage contains no partitions");
+        return false;
+    }
+    const uint64_t table_size = static_cast<uint64_t>(_header.part_tbl_num) * sizeof(kd_img_part_t);
+    if (table_size > std::numeric_limits<uint32_t>::max() ||
+        table_size > image_size - sizeof(kd_img_hdr_t) ||
+        table_size > std::numeric_limits<size_t>::max()) {
+        spdlog::error("Error: Invalid part table size");
+        return false;
+    }
+    const size_t sizePartsContent = static_cast<size_t>(table_size);
     std::vector<char> part_table_content(sizePartsContent);
     _image_file.read(part_table_content.data(), sizePartsContent);
+    if (_image_file.gcount() != static_cast<std::streamsize>(sizePartsContent)) {
+        spdlog::error("Error: Failed to read full part table");
+        return false;
+    }
 
     // Verify part table CRC32
     calc_crc32 = crc32(0, reinterpret_cast<const unsigned char *>(part_table_content.data()), sizePartsContent);
@@ -189,7 +213,7 @@ bool KburnKdImage::parse_parts(void) {
     // Parse parts
     _curr_parts.clear();
     for (size_t i = 0; i < sizePartsContent; i += sizeof(kd_img_part_t)) {
-        kd_img_part_t part;
+        kd_img_part_t part{};
 
         if(0x02 <= _header.img_hdr_version) {
             std::memcpy(&part, part_table_content.data() + i, sizeof(kd_img_part_t));
@@ -207,7 +231,7 @@ bool KburnKdImage::parse_parts(void) {
                 uint32_t part_content_size;
                 uint8_t  part_content_sha256[32];
                 char part_name[32];
-            } v1_part;
+            } v1_part{};
 
             static_assert(sizeof(struct v1_part) == 256, "v1_part size mismatch");
 
@@ -230,6 +254,27 @@ bool KburnKdImage::parse_parts(void) {
             spdlog::error("Error: Invalid part header magic!");
             return false;
         }
+        const std::string part_name = fixed_string(part.part_name, sizeof(part.part_name));
+        if (part_name.empty()) {
+            spdlog::error("Error: Partition name is empty");
+            return false;
+        }
+        if (!part.part_size || part.part_content_size > part.part_size) {
+            spdlog::error("Error: Invalid size for partition {}", part_name);
+            return false;
+        }
+        const uint64_t padding = static_cast<uint64_t>(part.part_size) - part.part_content_size;
+        if (padding > 4096) {
+            spdlog::error("Error: Align part size too large for {}: {}", part_name, padding);
+            return false;
+        }
+        const uint64_t content_floor = sizeof(kd_img_hdr_t) + table_size;
+        if ((part.part_content_size && part.part_content_offset < content_floor) ||
+            part.part_content_offset > image_size ||
+            part.part_content_size > image_size - part.part_content_offset) {
+            spdlog::error("Error: Partition {} content exceeds kdimage size", part_name);
+            return false;
+        }
 
         _curr_parts.push_back(part);
     }
@@ -237,241 +282,27 @@ bool KburnKdImage::parse_parts(void) {
     return true;
 }
 
-bool KburnKdImage::extract_parts(void) {
-    if (!_image_file.is_open()) {
-        spdlog::error("Error: image file not opened");
-        return false;
-    }
-
-    // Create a temporary directory
-    std::filesystem::path tempDir = std::filesystem::temp_directory_path() / "BurnImageItemsCli";
-    if (!std::filesystem::exists(tempDir)) {
-        std::filesystem::create_directory(tempDir);
-    }
-
-    // Iterate over all files and subdirectories in the temporary directory
-    for (const auto &entry : std::filesystem::directory_iterator(tempDir)) {
-        try {
-            // Remove the file or directory
-            std::filesystem::remove_all(entry.path());
-        } catch (const std::filesystem::filesystem_error &e) {
-            spdlog::error("Failed to remove {}: {}", entry.path().string(), e.what());
-        }
-    }
-
-    _items.clear();
-
-    for (const auto &part : _curr_parts) {
-        if (part.part_magic != KDIMG_PART_MAGIC) {
-            spdlog::error("Error: Invalid part header magic!");
-            return false;
-        }
-
-        // Initialize SHA-256
-        SHA256 sha256;
-
-        std::stringstream offset_str;
-        offset_str << "_0x" << std::setfill('0') << std::setw(8) << std::hex << part.part_offset;
-
-        // Create the filename
-        std::string tempFileName = (tempDir / (std::string(part.part_name) + offset_str.str() + ".bin")).string();
-
-        std::ofstream tempFile(tempFileName, std::ios::binary);
-
-        if (!tempFile.is_open()) {
-            spdlog::error("Error: Could not create temp file: {}", tempFileName);
-            return false;
-        }
-
-        // Extract data in chunks
-        uint64_t remainingSize = part.part_content_size;
-        uint64_t currentOffset = part.part_content_offset;
-
-        while (remainingSize > 0) {
-            size_t bytesToRead = std::min(ChunkSize, static_cast<size_t>(remainingSize));
-
-            _image_file.seekg(currentOffset);
-            std::vector<char> chunkData(bytesToRead);
-            _image_file.read(chunkData.data(), bytesToRead);
-
-            if (_image_file.gcount() != bytesToRead) {
-                spdlog::error("Error: Failed to read chunk at offset: {}", currentOffset);
-                return false;
-            }
-
-            // Update SHA-256
-            sha256.update(chunkData.data(), bytesToRead);
-
-            // Write to temp file
-            tempFile.write(chunkData.data(), bytesToRead);
-
-            currentOffset += bytesToRead;
-            remainingSize -= bytesToRead;
-        }
-
-        // Handle padding
-        if (part.part_content_size < part.part_size) {
-            uint32_t padding = part.part_size - part.part_content_size;
-            if (padding > 4096) {
-                spdlog::error("Error: Align part size too large: {}", padding);
-                return false;
-            } else {
-                std::vector<char> paddingData(padding, 0xFF);
-                tempFile.write(paddingData.data(), padding);
-            }
-        }
-
-        tempFile.close();
-
-        // Finalize SHA-256
-        std::string calculatedHash = sha256.final();
-        std::string partContentHash = to_hex_string(part.part_content_sha256, sizeof(part.part_content_sha256));
-
-        // Compare hashes
-        if (calculatedHash != partContentHash) {
-            spdlog::error("Error: SHA-256 mismatch for part: {}", part.part_name);
-            spdlog::error("Calculated SHA-256: {}", calculatedHash);
-            spdlog::error("Expected SHA-256:   {}", partContentHash);
-            return false;
-        }
-
-        // Write SHA-256 hash to a .sha256 file
-        std::string sha256FileName = tempFileName + ".sha256";
-        std::ofstream sha256File(sha256FileName, std::ios::binary);
-        if (!sha256File.is_open()) {
-            spdlog::error("Error: Could not create SHA-256 file: {}", sha256FileName);
-            return false;
-        }
-        sha256File << calculatedHash;
-        sha256File.close();
-
-        // Add to list
-        KburnImageItem_t item;
-        item.partName = part.part_name;
-        item.partOffset = part.part_offset;
-        item.partSize = part.part_max_size;
-        item.partEraseSize = part.part_erase_size;
-        item.partFlag = part.part_flag;
-        item.fileName = tempFileName;
-        item.fileSize = part.part_size;
-
-        _items.push(item);
-
-        spdlog::debug("extract part {} to {}", part.part_name, tempFileName);
-    }
-
-    std::sort(_last_parts.begin(), _last_parts.end());
-
-    return 0x00 != _items.size();
-}
-
-void KburnKdImage::get_parts_from_temp(void) {
-    std::filesystem::path tempDir = std::filesystem::temp_directory_path() / "BurnImageItemsCli";
-
-    _last_parts.clear();
-    if (!std::filesystem::exists(tempDir)) {
-        return;
-    }
-
-    // Iterate over all files in the temporary directory
-    for (const auto &entry : std::filesystem::directory_iterator(tempDir)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".bin") {
-            // Extract part name and offset from the filename
-            std::string filename = entry.path().stem().string(); // Remove extension
-            size_t offsetPos = filename.find("_0x");
-
-            if (offsetPos == std::string::npos) {
-                spdlog::warn("Skipping invalid file: {}", entry.path().string());
-                continue;
-            }
-
-            std::string partName = filename.substr(0, offsetPos);
-            std::string offsetStr = filename.substr(offsetPos + 1); // Skip "_"
-            uint64_t partOffset = std::stoull(offsetStr, nullptr, 16); // Convert hex string to uint64_t
-
-            spdlog::debug("filename {}, partName {}, partOffset {}({})", filename, partName, partOffset, offsetStr);
-
-            // Read the corresponding .sha256 file
-            std::filesystem::path sha256FilePath = entry.path().string() + ".sha256";
-            if (!std::filesystem::exists(sha256FilePath)) {
-                spdlog::warn("SHA-256 file not found for part: {}", partName);
-                continue;
-            }
-
-            std::ifstream sha256File(sha256FilePath, std::ios::binary);
-            if (!sha256File.is_open()) {
-                spdlog::warn("Failed to open SHA-256 file: {}", sha256FilePath.string());
-                continue;
-            }
-
-            std::string partContentSha256((std::istreambuf_iterator<char>(sha256File)), std::istreambuf_iterator<char>());
-            sha256File.close();
-
-            // Populate the kd_img_part_t struct
-            struct kd_img_part_t part = {};
-
-            // Set part name
-            std::strncpy(part.part_name, partName.c_str(), sizeof(part.part_name) - 1);
-            part.part_name[sizeof(part.part_name) - 1] = '\0'; // Ensure null-termination
-
-            // Set part offset
-            part.part_offset = static_cast<uint32_t>(partOffset);
-
-            // Set part content SHA-256
-            if (partContentSha256.size() == 64) { // SHA-256 hash is 64 characters in hex
-                for (size_t i = 0; i < 32; ++i) {
-                    std::string byteStr = partContentSha256.substr(i * 2, 2);
-                    part.part_content_sha256[i] = static_cast<uint8_t>(std::stoul(byteStr, nullptr, 16));
-                }
-            } else {
-                spdlog::warn("Invalid SHA-256 hash length for part: {}", partName);
-                continue;
-            }
-
-            // Add the part to _last_parts
-            _last_parts.push_back(part);
-
-            spdlog::debug("Loaded part {} from {}", part.part_name, entry.path().string());
-        }
-    }
-    std::sort(_last_parts.begin(), _last_parts.end());
-}
-
 void KburnKdImage::convert_parts_to_items(void) {
     _items.clear();
 
-    std::filesystem::path tempDir = std::filesystem::temp_directory_path() / "BurnImageItemsCli";
-    if (!std::filesystem::exists(tempDir)) {
-        spdlog::error("temp folder not exist\n");
-        return;
-    }
-
     for (const auto &part : _curr_parts) {
-        std::stringstream offset_str;
-        offset_str << "_0x" << std::setfill('0') << std::setw(8) << std::hex << part.part_offset;
-
-        std::string tempFileName = (tempDir / (std::string(part.part_name) + offset_str.str() + ".bin")).string();
-
-        std::ifstream tempFile(tempFileName, std::ios::binary);
-        if (!tempFile.is_open()) {
-            spdlog::error("Error: Could not open temp file: {}", tempFileName);
-            return;
-        }
-        tempFile.close();
-
-        // Add to list
-        KburnImageItem_t item;
-        item.partName = part.part_name;
+        KburnImageItem_t item{};
+        item.partName = fixed_string(part.part_name, sizeof(part.part_name));
         item.partOffset = part.part_offset;
         item.partSize = part.part_max_size;
         item.partEraseSize = part.part_erase_size;
         item.partFlag = part.part_flag;
-        item.fileName = tempFileName;
+        item.fileName = _image_path;
+        item.fileOffset = part.part_content_offset;
+        item.dataSize = part.part_content_size;
         item.fileSize = part.part_size;
+        item.paddingValue = 0xff;
+        item.verifyDataHash = true;
+        std::copy(std::begin(part.part_content_sha256),
+                  std::end(part.part_content_sha256), item.dataSha256.begin());
 
         _items.push(item);
     }
-    std::sort(_last_parts.begin(), _last_parts.end());
 }
 
 KburnImageItemList * KburnKdImage::items(void) {
@@ -495,22 +326,17 @@ KburnImageItemList * KburnKdImage::items(void) {
         return nullptr;
     }
 
-    get_parts_from_temp();
-
     spdlog::debug("image header:");
     dump_header();
 
     spdlog::debug("current image parts:");
     dump_parts(_curr_parts);
 
-    spdlog::debug("last image parts:");
-    dump_parts(_last_parts);
+    convert_parts_to_items();
+    _image_file.close();
 
-    if(_last_parts != _curr_parts) {
-        extract_parts();
-    } else {
-        convert_parts_to_items();
-    }
+    if (!_items.size())
+        return nullptr;
 
     return &_items;
 }

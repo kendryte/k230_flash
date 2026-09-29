@@ -26,6 +26,17 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 add_subdirectory(CLI11)
 target_link_libraries(${PROJECT_NAME} PRIVATE CLI11::CLI11)
 
+if(BUILD_TESTING)
+    add_test(
+        NAME k230_flash_cli_version
+        COMMAND $<TARGET_FILE:${PROJECT_NAME}> --version
+    )
+    set_tests_properties(k230_flash_cli_version PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "k230_flash_cli [0-9]+\\.[0-9]+\\.[0-9]+ \\(commit [^)]+\\)"
+    )
+endif()
+
 if(APPLE)
     set_target_properties(${PROJECT_NAME} PROPERTIES
         BUILD_RPATH "${CMAKE_BINARY_DIR}/bin"

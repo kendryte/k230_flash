@@ -115,3 +115,8 @@ The top-level CMake install step invokes the platform helper after installation:
 Raw image addresses passed to the CLI must be aligned to the selected medium's
 erase size. Writes do not reboot the board by default; pass `--auto-reboot` to
 request a reboot after a successful write.
+
+Pass `--verify` to the `flash` command to perform a device-side SHA-256
+readback after each written image. Verification is opt-in because it adds a
+complete read pass over every written range. SPI NAND writes with explicit OOB
+data are not supported by this mode.

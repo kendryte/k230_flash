@@ -2,11 +2,13 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include <filesystem>
 #include <sstream>
 #include <iostream>
 #include <chrono>
 #include <cinttypes>
 #include <iomanip>
+#include <limits>
 #include <memory>
 
 #include <stdexcept>
@@ -19,11 +21,22 @@
 #include <kburn.h>
 #include <kdimage.h>
 #include <k230/kburn_k230.h>
+#include <picosha2.h>
 
 using namespace std;
 using namespace std::chrono;
 
 using namespace Kendryte_Burning_Tool;
+
+static std::string getVersionString() {
+    std::ostringstream output;
+    output << "k230_flash_cli "
+           << COMPILE_VERSION_MAJOR << "."
+           << COMPILE_VERSION_MINOR << "."
+           << COMPILE_VERSION_PATCH
+           << " (commit " << COMPILE_HASH << ")";
+    return output.str();
+}
 
 struct ParsedArguments {
     std::vector<std::string> values;
@@ -154,36 +167,43 @@ bool fileExists(const std::string& filename) {
     return file.good(); // Returns true if the file can be opened
 }
 
-char* readFile(const std::string& filename, size_t& fileSize) {
-    // Open the file in binary mode
-    std::ifstream file(filename, std::ios::binary);
-    
-    // Check if the file was opened successfully
-    if (!file) {
-        throw std::runtime_error("Could not open file: " + filename);
+bool readImageItem(const KburnImageItem_t& item, std::vector<char>& data) {
+    if (!item.fileSize || item.dataSize > item.fileSize ||
+        item.fileSize > SIZE_MAX || item.dataSize > SIZE_MAX ||
+        item.fileOffset > static_cast<uint64_t>(std::numeric_limits<std::streamoff>::max())) {
+        return false;
     }
-    
-    // Seek to the end to get the size
+
+    std::ifstream file(item.fileName, std::ios::binary);
+    if (!file)
+        return false;
+
     file.seekg(0, std::ios::end);
-    fileSize = file.tellg(); // Get the size of the file
-    file.seekg(0, std::ios::beg); // Go back to the beginning
+    const std::streamoff file_size_value = file.tellg();
+    if (file_size_value < 0 || item.fileOffset > static_cast<uint64_t>(file_size_value) ||
+        item.dataSize > static_cast<uint64_t>(file_size_value) - item.fileOffset) {
+        return false;
+    }
+    file.seekg(static_cast<std::streamoff>(item.fileOffset), std::ios::beg);
+    if (!file)
+        return false;
 
-    // Allocate memory for the file content
-    char* buffer = new char[fileSize];
-
-    // Read the file into the buffer
-    if (!file.read(buffer, fileSize)) {
-        delete[] buffer; // Clean up on failure
-
-        printf("Failed to read file: %s", filename.c_str());
-
-        return nullptr;
+    data.assign(static_cast<size_t>(item.fileSize),
+                static_cast<char>(item.paddingValue));
+    if (item.dataSize) {
+        file.read(data.data(), static_cast<std::streamsize>(item.dataSize));
+        if (file.gcount() != static_cast<std::streamsize>(item.dataSize))
+            return false;
     }
 
-    // Close the file
-    file.close();
-
-    return buffer; // Return the buffer
+    if (item.verifyDataHash) {
+        std::array<uint8_t, picosha2::k_digest_size> digest{};
+        picosha2::hash256(data.begin(), data.begin() + item.dataSize,
+                         digest.begin(), digest.end());
+        if (digest != item.dataSha256)
+            return false;
+    }
+    return true;
 }
 
 bool hasSuffixCaseInsensitive(std::string filename, std::string suffix) {
@@ -309,7 +329,7 @@ int main(int argc, char **argv) {
     argv = parsed.argv.data();
 
     int exit_code = EXIT_FAILURE;
-    size_t file_offset_max = 0;
+    uint64_t file_offset_max = 0;
     struct kburn_usb_dev_info dev;
     KburnImageItemList *kdimg_items;
 
@@ -317,6 +337,9 @@ int main(int argc, char **argv) {
         "Flash images to Kendryte K230/K230D devices."};
     app.name("k230_flash_cli");
     app.set_help_flag("-h,--help", "Show this help message and exit");
+    const std::string version_string = getVersionString();
+    app.set_version_flag(
+        "--version", version_string, "Show version and commit information and exit");
     app.require_subcommand(1);
     app.footer(
         "Examples:\n"
@@ -325,7 +348,8 @@ int main(int argc, char **argv) {
         "  k230_flash_cli read --address 0 --size 0x100000 --read-file backup.bin\n"
         "  k230_flash_cli erase --address 0 --size 0x20000\n\n"
         "Raw image addresses must be aligned to the medium erase size.\n"
-        "Use --auto-reboot to reboot after a successful write.");
+		"Use --verify to perform SHA-256 media readback after each write.\n"
+		"Use --auto-reboot to reboot after a successful write.");
 
     CLI::App *devices_command = app.add_subcommand("devices", "List connected devices");
     CLI::App *flash_command = app.add_subcommand("flash", "Flash one or more ADDRESS FILE pairs");
@@ -338,6 +362,9 @@ int main(int argc, char **argv) {
 
     bool auto_reboot = false;
     app.add_flag("--auto-reboot", auto_reboot, "Enable automatic reboot after flashing.");
+	bool verify_after_write = false;
+	flash_command->add_flag("--verify", verify_after_write,
+				"Verify each written image using device-side SHA-256 readback.");
 
     std::string device_address;
     bool list_device = false;
@@ -375,6 +402,8 @@ int main(int argc, char **argv) {
     bool custom_loader = false;
     uint64_t loader_address = 0x80360000;
     std::string loader_file;
+    KburnImageItem_t loader_item{};
+    bool loader_item_valid = false;
     auto *loader_address_option = app.add_option("--loader-address", loader_address, "Custom loader load address")
         ->check(ValidLoadAddress)->default_str("0x80360000");
     auto *loader_file_option = app.add_option("--loader", loader_file, "Path to a custom loader");
@@ -419,7 +448,7 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    printf("K230 Flash Start.\n");
+    printf("%s\n", version_string.c_str());
 
     kburn_initialize();
     spdlog_set_log_level(static_cast<int>(log_level));
@@ -464,7 +493,7 @@ int main(int argc, char **argv) {
 			}
 
 			if (hasSuffixCaseInsensitive(write_file, std::string(".kdimg"))) {
-				std::unique_ptr<KburnImageItemList> items(get_kdimage_items(write_file));
+				KburnImageItemList *items = get_kdimage_items(write_file);
 				if (!items) {
 					printf("Parse *.kdimg failed: %s\n", write_file.c_str());
 					goto _exit;
@@ -475,37 +504,51 @@ int main(int argc, char **argv) {
 					if (item.partName == std::string("loader")) {
 						custom_loader = true;
 						loader_file = item.fileName;
+						loader_item = item;
+						loader_item_valid = true;
                         loader_address = 0x80360000;
 					}
 				}
 				continue;
 			}
 
-			if (raw_address > UINT32_MAX || input_size > UINT32_MAX ||
-				input_size > UINT32_MAX - raw_address) {
-				printf("Raw image address and size must fit in the 32-bit image layout.\n");
+			if (input_size > UINT64_MAX - raw_address) {
+				printf("Raw image address and size overflow the 64-bit image layout.\n");
 				goto _exit;
 			}
 
-			struct KburnImageItem_t item;
+			struct KburnImageItem_t item{};
 			item.partName = std::string("image");
-			item.partOffset = static_cast<uint32_t>(raw_address);
+			item.partOffset = raw_address;
 			item.partSize = 0;
 			item.partEraseSize = 0x00;
 			item.partFlag = 0x00;
 			item.fileName = write_file;
-			item.fileSize = static_cast<uint32_t>(input_size);
+			item.fileOffset = 0;
+			item.dataSize = input_size;
+			item.fileSize = input_size;
 			kdimg_items->push(item);
 			raw_address += input_size;
-			file_offset_max = static_cast<size_t>(std::max<uint64_t>(file_offset_max, raw_address));
+			file_offset_max = std::max(file_offset_max, raw_address);
 		}
-    }
+	}
 
     if(custom_loader) {
         if(!fileExists(loader_file)) {
             printf("--loader file does not exist: %s\n", loader_file.c_str());
-            goto _exit;
-        }
+	        goto _exit;
+	    }
+		if (!loader_item_valid) {
+			const uint64_t loader_size = std::filesystem::file_size(loader_file);
+			if (!loader_size || loader_size > SIZE_MAX) {
+				printf("Invalid custom loader size: %s\n", loader_file.c_str());
+				goto _exit;
+			}
+			loader_item.fileName = loader_file;
+			loader_item.dataSize = loader_size;
+			loader_item.fileSize = loader_size;
+			loader_item_valid = true;
+		}
     }
 
     try {
@@ -532,11 +575,16 @@ int main(int argc, char **argv) {
 
         const char *loader_data;
         size_t loader_size;
-		std::unique_ptr<char[]> owned_loader;
+		std::vector<char> owned_loader;
 
         if(custom_loader) {
-			owned_loader.reset(readFile(loader_file, loader_size));
-			loader_data = owned_loader.get();
+			if (!loader_item_valid || !readImageItem(loader_item, owned_loader)) {
+				printf("Failed to read or validate loader: %s\n", loader_file.c_str());
+				delete brom_burner;
+				goto _exit;
+			}
+			loader_size = owned_loader.size();
+			loader_data = owned_loader.data();
         } else {
             brom_burner->get_loader(&loader_data, &loader_size);
         }
@@ -597,6 +645,7 @@ int main(int argc, char **argv) {
         K230::K230UBOOTBurner *uboot_burner = reinterpret_cast<K230::K230UBOOTBurner *>(burner);
 
         uboot_burner->register_progress_fn(progress, NULL);
+		uboot_burner->set_verify_after_write(verify_after_write);
 
         uboot_burner->set_medium_type(medium_type);
 
@@ -711,37 +760,48 @@ int main(int argc, char **argv) {
                     goto _exit;
                 }
 
-					file.seekg(0, std::ios::end);
-					std::streamoff file_size_value = file.tellg();
-					if (file_size_value <= 0 ||
-					    static_cast<uint64_t>(file_size_value) > SIZE_MAX) {
-						printf("Error: Invalid file size for part %s.\n",
-						       item.partName.c_str());
-						delete uboot_burner;
-						goto _exit;
-					}
-					size_t file_size = static_cast<size_t>(file_size_value);
-				file.seekg(0, std::ios::beg);
-					uint64_t physical_file_size;
-					uint64_t layout_extent;
-					if (!get_physical_write_size(item, file_size, *medium_info,
-								     &physical_file_size) ||
-					    (item.partSize && physical_file_size > item.partSize)) {
-						printf("Error: Invalid size or OOB layout for part %s.\n",
-						       item.partName.c_str());
-						delete uboot_burner;
-						goto _exit;
-					}
-					layout_extent = std::max<uint64_t>(
-						physical_file_size,
-						std::max<uint64_t>(item.partSize, item.partEraseSize));
-					if (item.partOffset > medium_info->capacity ||
-					    layout_extent > medium_info->capacity - item.partOffset) {
-						printf("Error: Part %s exceeds medium capacity.\n",
-						       item.partName.c_str());
-						delete uboot_burner;
-						goto _exit;
-					}
+                file.seekg(0, std::ios::end);
+                std::streamoff source_file_size = file.tellg();
+                if (source_file_size <= 0 || !item.fileSize ||
+                    item.fileSize > SIZE_MAX || item.dataSize > item.fileSize ||
+                    item.dataSize > SIZE_MAX ||
+                    item.fileOffset > static_cast<uint64_t>(source_file_size) ||
+                    item.dataSize > static_cast<uint64_t>(source_file_size) - item.fileOffset ||
+                    item.fileOffset > static_cast<uint64_t>(std::numeric_limits<std::streamoff>::max())) {
+                    printf("Error: Invalid file size for part %s.\n",
+                           item.partName.c_str());
+                    delete uboot_burner;
+                    goto _exit;
+                }
+                size_t file_size = static_cast<size_t>(item.fileSize);
+                size_t source_size = static_cast<size_t>(item.dataSize);
+                file.seekg(static_cast<std::streamoff>(item.fileOffset), std::ios::beg);
+                if (!file) {
+                    printf("Error: Failed to seek to part %s data.\n",
+                           item.partName.c_str());
+                    delete uboot_burner;
+                    goto _exit;
+                }
+                uint64_t physical_file_size;
+                uint64_t layout_extent;
+                if (!get_physical_write_size(item, file_size, *medium_info,
+                                             &physical_file_size) ||
+                    (item.partSize && physical_file_size > item.partSize)) {
+                    printf("Error: Invalid size or OOB layout for part %s.\n",
+                           item.partName.c_str());
+                    delete uboot_burner;
+                    goto _exit;
+                }
+                layout_extent = std::max<uint64_t>(
+                    physical_file_size,
+                    std::max<uint64_t>(item.partSize, item.partEraseSize));
+                if (item.partOffset > medium_info->capacity ||
+                    layout_extent > medium_info->capacity - item.partOffset) {
+                    printf("Error: Part %s exceeds medium capacity.\n",
+                           item.partName.c_str());
+                    delete uboot_burner;
+                    goto _exit;
+                }
 
                 uint64_t medium_erase_size = medium_info->erase_size;
                 if (medium_erase_size == 0) {
@@ -751,7 +811,7 @@ int main(int argc, char **argv) {
                 }
 
                 if (item.partOffset % medium_erase_size != 0) {
-					printf("Error: Part %s offset 0x%08" PRIX32
+					printf("Error: Part %s offset 0x%08" PRIX64
 					       " is not aligned to erase size %" PRIu64 ".\n",
 					       item.partName.c_str(), item.partOffset,
 					       medium_erase_size);
@@ -782,15 +842,29 @@ int main(int argc, char **argv) {
                     }
                 }
 
-				printf("Write %s to 0x%08" PRIX32 ", Size: %zu.\n",
+				printf("Write %s to 0x%08" PRIX64 ", Size: %zu.\n",
 				       item.fileName.c_str(), item.partOffset, file_size);
 
-                if (false == uboot_burner->write_stream(file, file_size, item.partOffset, item.partSize, item.partFlag)) {
-					printf("Write %s to 0x%08" PRIX32 " failed.\n",
+                if (false == uboot_burner->write_stream(
+                    file, file_size, item.partOffset, item.partSize,
+                    item.partFlag, source_size, item.paddingValue,
+                    item.verifyDataHash ? item.dataSha256.data() : nullptr)) {
+					printf("Write %s to 0x%08" PRIX64 " failed.\n",
 					       item.fileName.c_str(), item.partOffset);
                     delete uboot_burner;
                     goto _exit;
                 }
+				if (verify_after_write) {
+					uint64_t verify_bytes =
+						uboot_burner->get_last_verify_bytes();
+					uint64_t verify_ms =
+						uboot_burner->get_last_verify_elapsed_ms();
+					double verify_speed = verify_ms ?
+						(verify_bytes / 1024.0) / (verify_ms / 1000.0) : 0.0;
+					printf("Verify %s done, SHA-256 matched, use %.2f sec, speed %.2f KB/s.\n",
+					       item.fileName.c_str(), verify_ms / 1000.0,
+					       verify_speed);
+				}
                 file.close();
             }
         }

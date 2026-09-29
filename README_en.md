@@ -9,16 +9,19 @@ chips. It supports programming firmware to `EMMC`, `SDCARD`, `SPI-NOR`,
 ## Command interface
 
 ```bash
+k230_flash_cli --version
 k230_flash_cli devices
 k230_flash_cli flash 0x1000 bootloader.bin 0x8000 firmware.bin --medium-type EMMC
+k230_flash_cli flash 0 image.img --medium-type SDCARD --verify
 k230_flash_cli flash 0x100000 image.bin --medium-type SPI_NOR --loader loader.bin
 k230_flash_cli read --read-file backup.bin --address 0 --size 0x100000
 k230_flash_cli erase --address 0 --size 0x20000 --medium-type SPI_NAND
 ```
 
-Common options are `--device-address PATH`, `--medium-type TYPE`,
-`--log-level LEVEL`, and `--auto-reboot`. Medium names are `EMMC`, `SDCARD`,
-`SPI_NAND`, `SPI_NOR`, and `OTP`.
+Use `--version` to print the CLI version and build commit ID. Common options
+are `--device-address PATH`, `--medium-type TYPE`, `--log-level LEVEL`, and
+`--auto-reboot`. The `flash` command also accepts `--verify`. Medium names are
+`EMMC`, `SDCARD`, `SPI_NAND`, `SPI_NOR`, and `OTP`.
 
 `devices` prints each board's full physical USB port path. Directly connected
 devices use paths such as `1-1`; devices behind hubs use paths such as
@@ -32,6 +35,12 @@ notation. `--loader` selects a custom loader for the device operation;
 used with `flash`, `read`, and `erase`. Raw image addresses must be aligned to
 the selected medium's erase size. Automatic reboot after a successful write is
 opt-in with `--auto-reboot`.
+
+Pass `--verify` to hash the exact padded bytes sent by the host, read the
+written range back on the device, and compare SHA-256 digests before reporting
+success or rebooting. Verification is optional because it adds a complete
+medium read pass. SPI NAND writes containing explicit OOB data do not support
+this mode.
 
 ## Release packages
 
