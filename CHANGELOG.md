@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.13 - 2026-10-21
+
+### Changed
+
+- Updated the embedded MMC, OTP, SPI NAND, and SPI NOR loaders.
+
+### Fixed
+
+- Fixed the MMC loader's handling of writes to protected media.
+
 ## 0.0.12 - 2026-09-28
 
 ### Added
