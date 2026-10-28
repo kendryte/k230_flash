@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.14 - 2026-10-28
+
+### Changed
+
+- Updated the embedded MMC, OTP, SPI NAND, and SPI NOR loaders.
+- Updated eMMC HS200 tuning in the MMC loader.
+
 ## 0.0.13 - 2026-10-21
 
 ### Changed
