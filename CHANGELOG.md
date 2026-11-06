@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.15 - 2026-11-06
+
+### Changed
+
+- Updated the embedded MMC, OTP, SPI NAND, and SPI NOR loaders.
+
+### Fixed
+
+- Fixed the MMC loader's write-alignment check to use 512-byte blocks,
+  allowing writes to partitions that are not aligned to an eMMC erase group.
+
 ## 0.0.14 - 2026-10-28
 
 ### Changed
