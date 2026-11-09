@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.16 - 2026-11-09
+
+### Changed
+
+- Updated the embedded MMC, OTP, SPI NAND, and SPI NOR loaders.
+
 ## 0.0.15 - 2026-11-06
 
 ### Changed
