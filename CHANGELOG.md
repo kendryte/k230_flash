@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.0.17 - 2026-11-18
+
+### Changed
+
+- Updated the embedded MMC, OTP, SPI NAND, and SPI NOR loaders.
+
+### Fixed
+
+- Fixed SD card writes that failed on some boards with a CMD25 write error
+  at the start of the image. After a high-speed write error, the MMC loader
+  now resets the controller and continues in default-speed (25 MHz) timing,
+  then at 12.5 MHz if needed. Flashing still completes but is slower.
+- The MMC loader now retries a failed SD or eMMC initialization once in
+  default-speed timing, and reports the error code when it fails.
+
 ## 0.0.16 - 2026-11-09
 
 ### Changed
